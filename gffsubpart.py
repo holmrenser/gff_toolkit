@@ -103,7 +103,7 @@ class GffSubPart(object):
 		elif isinstance(other,basestring):
 			return self.ID == other
 		else:
-			e = 'Cannot compare GffSubPart to object of type <{0}>'.format(type(other))
+			e = 'Cannot compare GffSubPart to object of type {0}'.format(type(other))
 			raise NotImplementedError(e)
 	def stringify(self):
 		"""

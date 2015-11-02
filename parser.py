@@ -17,13 +17,14 @@ class Parser(object):
 	def _readlines(self):
 		with open(self.filename,'rU') as fh:
 			for line in fh:
-				if not line.strip():
+				if line[0] == '#' or not line.strip():
 					continue
 				parts = line.strip().split('\t')
 				yield GffSubPart(*parts)
 	def parse(self):
 		for subpart in self._readlines():
-			Gff.update(subpart)
+			self.gff.update(subpart)
+		return self.gff
 
 def linereader(gff_file,strict=True):
 	with open(gff_file,'rU') as fh:
