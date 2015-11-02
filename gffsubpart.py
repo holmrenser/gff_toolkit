@@ -18,7 +18,7 @@ class GffSubPart(object):
 	work on getter/setter for ID, ratt uses locus_tag for ID of transferred annotations, currently this is handled by parser.py
 	Make this a sort of 'baseclass', for instance only mRNA should have a pep option. Do this by subclassing
 	"""
-	_featuretypes = ['gene','mRNA','CDS','exon','three_prime_UTR','five_prime_UTR','match','match_part']
+	_featuretypes = ['gene','mRNA','CDS','exon','three_prime_UTR','five_prime_UTR','match','match_part','protein_match','transcript_match','biological_region']
 	def __init__(self,*args,**kwargs):
 		"""
 		Letsa go!
@@ -61,7 +61,7 @@ class GffSubPart(object):
 		if 'ID' in self.attributes:
 			self.ID = self.attributes['ID'][0]
 		else:
-			if kwargs['strict']:
+			if kwargs.get('strict',False):
 				e = 'No ID found in attributes: ' + '\t'.join(args)
 				raise AttributeError(e)
 			else:

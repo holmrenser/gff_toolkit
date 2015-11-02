@@ -4,7 +4,7 @@ docstring for testing
 """
 __author__ = 'rensholmer'
 
-from .parser import parser
+from .parser import Parser
 import tempfile
 import os
 

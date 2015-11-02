@@ -3,6 +3,8 @@ __author__ = 'rensholmer'
 from gff_toolkit.gffsubpart import GffSubPart
 from itertools import groupby #groupby for fasta parsing
 import blist #use sorted list object for indexing
+import pprint
+from bx.intervals.intersection import Intersecter, Interval
 
 class Gff(object):
 	"""
@@ -11,7 +13,7 @@ class Gff(object):
 	_combos = [{'gene':{'mRNA':['CDS','exon','five_prime_UTR','three_prime_UTR']}},
 				{'match':'match_part'},
 				{'protein_match':'match_part'}]
-	_levels = ['gene','mRNA','CDS','exon','five_prime_UTR','three_prime_UTR',
+	_featuretypes = ['gene','mRNA','CDS','exon','five_prime_UTR','three_prime_UTR',
 	          'match','protein_match','transcript_match','match_part',
 	           'biological_region']
 	def __init__(self,*args,**kwargs):
@@ -20,19 +22,28 @@ class Gff(object):
 		"""
 		self.features = {} #dict with {ID:[feature1,feature2,...]}   OLD:{seqid:[GffSubPart1,GffSubPart2,etc]}
 		self.seq = {} #sequencedict with {header:seq}
+		self._typecounts = {l:0 for l in self._featuretypes}
+		self._uniqueID = 0
 		if 'filename' in kwargs:
 			self.filename = kwargs['filename']
 		else:
 			self.filename = ''
-		self.index = {'+':{},'-':{}}#blist.sortedlist()
+		self.name_index = {}
+		self.position_index = {}#blist.sortedlist()
+		self.type_index = {l:set() for l in self._featuretypes}
 	def __iter__(self):
 		"""
 		Lets loop over all subfeatures
 		"""
-		for s in self.features:
-			for f in self.features[s]:
-				for sub in self.features[s][f]:
-					yield sub
+		for f in self.features.values():
+			yield f
+		#	for s in self.features[s]:
+		#		yield s
+		
+		#for s in self.features:
+		#	for f in self.features[s]:
+		#		for sub in self.features[s][f]:
+		#			yield sub
 	def __getitem__(self,key):
 		"""
 		Allow square bracket access based on ID, like this: gff[ID]
@@ -40,22 +51,28 @@ class Gff(object):
 		if not isinstance(key,basestring):
 			e = 'Object of type {0} is not a valid key'.format(type(key))
 			raise TypeError(e)
-		found = False
-		for s in self.features:
-			if key in self.features[s]:
-				found = True
-				for sub in self.features[s][key]:
-					yield sub
-			else:
-				continue
-		if not found:
-			return
-			e = '{0} not found'.format(key)
-			raise ValueError(e)
+		for uniqueID in self.name_index[key]:
+			yield self.features[uniqueID]
+		#found = False
+		#for s in self.features:
+		#	if key in self.features[s]:
+		#		found = True
+		#		for sub in self.features[s][key]:
+		#			yield sub
+		#	else:
+		#		continue
+		#if not found:
+		#	return
+		#	e = '{0} not found'.format(key)
+		#	raise ValueError(e)
 	def __str__(self):
 		return self.filename #temporary
 	def __repr__(self):
 		return self.__str__()
+	@property
+	def typecounts(self):
+	    return pprint.pprint(self._typecounts)
+	
 	def stringify(self):
 		"""
 		Returns entire object as gff formatted string
@@ -64,9 +81,9 @@ class Gff(object):
 		for sub in self:
 			string.append(sub.stringify())
 		return ''.join(string)
-	def getitems(self,seqid=None,level=None):
+	def getitems(self,seqid=None,start=None,stop=None,strand=None,featuretype=None):
 		"""
-		Select based on seqid (scf0002,chr1,etc.) and level (gene,mRNA,etc.)
+		Select based on seqid (scf0002,chr1,etc.) and featuretype (gene,mRNA,etc.)
 		"""
 		if seqid != None:
 			if isinstance(seqid,basestring):
@@ -74,31 +91,37 @@ class Gff(object):
 			else:
 				e = '{0} is not a valid type for seqid'.format(type(seqid))
 				raise TypeError(e)
-		else:
-			seqid = self.features.keys()
-		if level != None:
-			if isinstance(level,basestring) and level in self._levels:
-				level = [level]
-			elif isinstance(level,(list,tuple)):
+		elif featuretype != None:
+			for f in self.type_index[featuretype]:
+				yield f
+
+		if (start == None and stop != None) or (start != None and stop == None):
+			raise IndexError()
+		if featuretype != None:
+			if isinstance(featuretype,basestring) and featuretype in self._featuretypes:
+				featuretype = [featuretype]
+			elif isinstance(featuretype,(list,tuple)):
 				pass
 			else:
-				e = '{0} is not a valid type for level'.format(type(level))
+				e = '{0} is not a valid type for featuretype'.format(type(featuretype))
 				raise TypeError(e)
+
+
 		for s in seqid:
-			if s not in self.features:
+			if s not in self.position_index:
 				continue
 			for f in self.features[s]:
 				for sub in self.features[s][f]:
-					if level == None or sub.featuretype in level:
+					if featuretype == None or sub.featuretype in featuretype:
 						yield sub
 
-	def getseq(self,feature=None,sublevel=None,toplevel=None):
+	def getseq(self,feature=None,subfeaturetype=None,topfeaturetype=None):
 		if isinstance(feature,basestring):
 			features = self[feature]
 		elif isinstance(feature,GffSubPart):
 			features = [feature]
 		elif feature == None:
-			features = self.getitems(level=toplevel)
+			features = self.getitems(featuretype=topfeaturetype)
 		else:
 			raise TypeError('feature is not of type GffSubPart, or String')
 
@@ -110,35 +133,13 @@ class Gff(object):
 				reverse = False
 			else:
 				reverse = True
-			children = self.get_children(f,featuretype=sublevel)
+			children = self.get_children(f,featuretype=subfeaturetype)
 			children = sorted([c for c in children],key = lambda x: x.get_start(),reverse=reverse)
 			for c in children:
 				c.seq = self.seq[c.seqid][c.start-1:c.end]
 				if reverse:
 					c._revcomp()
 				f.seq += c.seq
-
-	def sort(self,feature=None,reverse=False):
-		if isinstance(feature,basestring):
-			features = [feature]
-		elif isinstance(feature,GffSubPart):
-			features = [feature.ID]
-		elif feature == None:
-			features = (f.ID for f in self)
-		else:
-			e = '<{0}> is not a valid featuretype'.format(feature)
-			raise TypeError(e)
-
-		for f in features:
-			children_names = [c.children for c in self[f] if c.children]
-			children_names = set([y for x in children_names for y in x])
-			if not children_names:
-				continue
-			children = [c for n in children_names for c in self[n]]
-			children = sorted(children,key=lambda x:x.start)
-
-			for sub in self[f]:
-				sub.children = [c.ID for c in children]
 
 	def remove(self,key,nested=True):
 		"""
@@ -170,16 +171,17 @@ class Gff(object):
 		for k in set(nestedkeys):
 			if k.ID not in self.features[k.seqid]:
 				continue
+			self._typecounts[k.featuretype] -= 1
 			self.features[k.seqid][k.ID].remove(k)
 			if len(self.features[k.seqid][k.ID]) == 0:
 				del self.features[k.seqid][k.ID]
 		return True
 
-	def names(self,seqid=None,level=None):
+	def names(self,seqid=None, featuretype=None):
 		"""
 		:return:
 		"""
-		for f in self.getitems(seqid=seqid,level=level):
+		for f in self.getitems(seqid=seqid,featuretype=featuretype):
 			yield f.ID
 
 	def update(self,subfeature):
@@ -198,6 +200,7 @@ class Gff(object):
 					self.features[subfeature.seqid][name] = [subfeature]
 			else:
 				self.features[subfeature.seqid] = {name:[subfeature]}
+		self._typecounts[subfeature.featuretype] += 1 
 	def make_index(self):
 		for subfeature in self:
 			if subfeature.seqid not in self.index[subfeature.strand]:
@@ -289,10 +292,9 @@ class Gff(object):
 						yield ii
 					elif found > 0:
 						break
-
 	def add_fasta(self,filename):
 		"""
-		:param filehandle: open filehandle with fasta formatted sequence information
+		:param filehandle: fasta formatted DNA sequence file
 		:return:
 		"""
 		with open(filename,'rU') as filehandle:
@@ -380,7 +382,7 @@ class Gff(object):
 			if found_stop and found_start:
 				remove.append(c)
 		self.remove(remove)
-		self.getseq(subfeature,toplevel=subfeature.featuretype,sublevel='CDS')
+		self.getseq(subfeature,topfeaturetype=subfeature.featuretype,subfeaturetype='CDS')
 		if len(subfeature.seq) < 6 or len(subfeature.seq) % 3 != 0:
 			return False
 		else:
