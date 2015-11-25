@@ -1,1 +1,5 @@
 intervaltree
+python-coveralls
+coverage
+nose
+
