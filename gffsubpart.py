@@ -7,6 +7,8 @@ class TranslateError(Exception):
 	pass
 class SeqError(Exception):
 	pass
+class CoordinateError(Exception):
+	pass
 
 class GffSubPart(object):
 	"""
@@ -19,6 +21,7 @@ class GffSubPart(object):
 	Make this a sort of 'baseclass', for instance only mRNA should have a pep option. Do this by subclassing
 	"""
 	_featuretypes = ['gene','mRNA','CDS','exon','three_prime_UTR','five_prime_UTR','match','match_part','protein_match','transcript_match','biological_region']
+	_filetypes = ['gff','tbl']
 	def __init__(self,*args,**kwargs):
 		"""
 		Letsa go!
@@ -36,23 +39,27 @@ class GffSubPart(object):
 		self.comments = None #Not implemented
 		self._pep = ''
 		self._seq = ''
-		self._key = None #Unique key made of (ID,seqid,start,stop,strand) not implemented
+		self._key = None #Unique ID
+		self.container = None # This will be a Gff object so that the GffSubFeature can find its child/parent objects
 		if len(args) == 9:
 			self.seqid = args[0]
 			self.source = args[1]
 			self.featuretype = args[2]
 			self.start = min(int(args[3]),int(args[4]))#int(args[3])
 			self.end = max(int(args[3]),int(args[4]))#int(args[4])
-			assert self.end > self.start,[self.seqid,self.start,self.end]
-			try:
-				self.score = int(args[5])
-			except ValueError:
+			if not self.end > self.start:
+				e = 'End must be larger than Start: {0}\t{1}\t{2}'.format(self.seqid,self.start,self.end)
+				#raise CoordinateError(e)#,[self.seqid,self.start,self.end]
+				self.end += 1
+			if args[5] == '.':
 				self.score = args[5]
+			else:
+				self.score = int(args[5])
 			self.strand = args[6]
-			try:
-				self.phase = int(args[7])
-			except ValueError:
+			if args[7] == '.':
 				self.phase = args[7]
+			else:
+				self.phase = int(args[7])
 			att = args[8].split(';')
 			self.attributes = { a.split('=')[0]: a.split('=')[1].split(',') for a in att}
 		elif len(args) > 0:
@@ -60,16 +67,16 @@ class GffSubPart(object):
 			raise AttributeError(e)
 		if 'ID' in self.attributes:
 			self.ID = self.attributes['ID'][0]
-		else:
+		self.ID = self.attributes.get('ID',[None])[0]
+		if not self.ID:
 			if kwargs.get('strict',False):
 				e = 'No ID found in attributes: ' + '\t'.join(args)
 				raise AttributeError(e)
 			else:
 				self.ID = '{0}.{1}'.format(self.attributes['Parent'][0],self.featuretype)
-		if 'Parent' in self.attributes:
-			for parent in self.attributes['Parent']:
-				self.parents.append(parent)
-		self._key = (self.ID,self.seqid,self.start,self.end,self.strand)
+		for parent in self.attributes.get('Parent',[]):
+			self.parents.append(parent)
+		#self._key = (self.ID,self.seqid,self.start,self.end,self.strand)
 	def __str__(self):
 		"""
 		Lets print this
@@ -105,20 +112,32 @@ class GffSubPart(object):
 		else:
 			e = 'Cannot compare GffSubPart to object of type {0}'.format(type(other))
 			raise NotImplementedError(e)
-	def stringify(self):
+	def stringify(self,filetype='gff'):
 		"""
 		Return gff style tab separated string 
 		"""
-		s = (self.seqid,self.source,self.featuretype,self.start,self.end,self.score,self.strand,self.phase)
-		s = (str(x) for x in s)
-		s = '\t'.join(s)
-		a = []
-		for key,value in self.attributes.iteritems():
-			#print key,value
-			value = (re.sub(' ','%20',x) for x in value) 
-			a.append('{0}={1}'.format(key,','.join(value)))
-		a = ';'.join(a)
-		return '{0}\t{1}\n'.format(s,a)
+		if filetype not in self._filetypes:
+			e = '{0} is not a valid filetype'.format(filetype)
+			raise TypeError(e)
+		if filetype == 'gff':
+			s = (self.seqid,self.source,self.featuretype,self.start,self.end,self.score,self.strand,self.phase)
+			s = (str(x) for x in s)
+			s = '\t'.join(s)
+			a = []
+			for key,value in self.attributes.iteritems():
+				a.append('{0}={1}'.format(key,','.join(value)))
+			a = ';'.join(a)
+			return '{0}\t{1}\n'.format(s,a)
+		elif filetype == 'tbl':
+			lines = ['{0}\t{1}\t{2}'.format(self.start,self.end,self.featuretype)]
+			if self.featuretype == 'gene':
+				name = self.attributes.get('Name',False)[0]
+				if name:
+					lines.append('\t\t\tgene\t{0}'.format(name))
+				lines.append('\t\t\tlocus_tag\t{0}'.format(self.ID))
+			elif self.featuretype in ['mRNA','CDS']:
+				lines.append('\t\t\tproduct\tNone')
+			return '\n'.join(lines)
 	@property
 	def seq(self):
 		return self._seq
@@ -144,6 +163,20 @@ class GffSubPart(object):
 	@pep.deleter
 	def pep(self):
 		self._pep = ''
+
+	def set_attribute(self,key,value):
+		if isisintance(value,basestring):
+			self.attributes.setdefault(key,[]).append(value)
+		elif hasattr(value,'__iter__'):
+			for v in value:
+				self.attributes.setdefault(key,[]).append(value)
+		else:
+			e = '{0} is not a valid type for GffSubPart attribute values'.format(type(value))
+			raise TypeError(e)
+
+	def getattribute(self,key):
+		for value in self.attributes.get(key,[]):
+			yield value
 
 	def set_start(self,value):
 		"""

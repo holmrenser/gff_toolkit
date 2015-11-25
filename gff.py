@@ -1,10 +1,10 @@
 __author__ = 'rensholmer'
 
-from gff_toolkit.gffsubpart import GffSubPart
+from .gffsubpart import GffSubPart
 from itertools import groupby #groupby for fasta parsing
 import blist #use sorted list object for indexing
 import pprint
-from bx.intervals.intersection import Intersecter, Interval
+from intervaltree import IntervalTree, Interval
 
 class Gff(object):
 	"""
@@ -20,30 +20,20 @@ class Gff(object):
 		"""
 		Fire it up!
 		"""
-		self.features = {} #dict with {ID:[feature1,feature2,...]}   OLD:{seqid:[GffSubPart1,GffSubPart2,etc]}
+		self.features = {} #dict with {uniqueID1:feature1,uniqueID2:feature2,...}   OLD:{seqid:[GffSubPart1,GffSubPart2,etc]}
 		self.seq = {} #sequencedict with {header:seq}
-		self._typecounts = {l:0 for l in self._featuretypes}
+		#self._typecounts = {l:0 for l in self._featuretypes}
 		self._uniqueID = 0
-		if 'filename' in kwargs:
-			self.filename = kwargs['filename']
-		else:
-			self.filename = ''
-		self.name_index = {}
-		self.position_index = {}#blist.sortedlist()
-		self.type_index = {l:set() for l in self._featuretypes}
+		self.filename = kwargs.get('filename','')
+		self.name_index = {} #dict with {ID:set(uniqueID1,uniqueID2,),..} to access features based on non unique ID
+		self.position_index = {}#bx.intervaltree
+		self.type_index = {l:set() for l in self._featuretypes} #dict with {featuretype:set(uniqueID1,uniqueID2,),...} to access features based on featuretype
 	def __iter__(self):
 		"""
 		Lets loop over all subfeatures
 		"""
 		for f in self.features.values():
 			yield f
-		#	for s in self.features[s]:
-		#		yield s
-		
-		#for s in self.features:
-		#	for f in self.features[s]:
-		#		for sub in self.features[s][f]:
-		#			yield sub
 	def __getitem__(self,key):
 		"""
 		Allow square bracket access based on ID, like this: gff[ID]
@@ -53,25 +43,18 @@ class Gff(object):
 			raise TypeError(e)
 		for uniqueID in self.name_index[key]:
 			yield self.features[uniqueID]
-		#found = False
-		#for s in self.features:
-		#	if key in self.features[s]:
-		#		found = True
-		#		for sub in self.features[s][key]:
-		#			yield sub
-		#	else:
-		#		continue
-		#if not found:
-		#	return
-		#	e = '{0} not found'.format(key)
-		#	raise ValueError(e)
 	def __str__(self):
 		return self.filename #temporary
 	def __repr__(self):
 		return self.__str__()
+
 	@property
+	def uniqueID(self):
+		self._uniqueID += 1
+		return self._uniqueID
+	
 	def typecounts(self):
-	    return pprint.pprint(self._typecounts)
+		return pprint.pprint({k:len(v) for k,v in self.type_index.iteritems() if len(v) > 0})
 	
 	def stringify(self):
 		"""
@@ -81,22 +64,11 @@ class Gff(object):
 		for sub in self:
 			string.append(sub.stringify())
 		return ''.join(string)
+
 	def getitems(self,seqid=None,start=None,stop=None,strand=None,featuretype=None):
 		"""
 		Select based on seqid (scf0002,chr1,etc.) and featuretype (gene,mRNA,etc.)
 		"""
-		if seqid != None:
-			if isinstance(seqid,basestring):
-				seqid = [seqid]
-			else:
-				e = '{0} is not a valid type for seqid'.format(type(seqid))
-				raise TypeError(e)
-		elif featuretype != None:
-			for f in self.type_index[featuretype]:
-				yield f
-
-		if (start == None and stop != None) or (start != None and stop == None):
-			raise IndexError()
 		if featuretype != None:
 			if isinstance(featuretype,basestring) and featuretype in self._featuretypes:
 				featuretype = [featuretype]
@@ -105,15 +77,42 @@ class Gff(object):
 			else:
 				e = '{0} is not a valid type for featuretype'.format(type(featuretype))
 				raise TypeError(e)
+		if seqid == None:
+			if start != None:
+				e = 'Can not provide start when no seqid is provided'
+				raise NotImplementedError(e)
+			elif stop != None:
+				e = 'Can not provide stop when no seqid is provided'
+				raise NotImplementedError(e)
+			elif strand != None:
+				e = 'Can not provide strand when no seqid is provided'
+				raise NotImplementedError(e)
+			else:
+				seqids = self.position_index.keys()
+				#for f in featuretype:
+				#	for uniqueID in self.type_index[f]:
+				#		sub = self.features[uniqueID]
+				#		if f == None or sub.featuretype in f:
+				#			yield sub
+		elif not isinstance(seqid,basestring):
+			e = '{0} is not a valid type for seqid'.format(type(seqid))
+			raise TypeError(e)
+		else:
+			seqids = [seqid]
 
-
-		for s in seqid:
-			if s not in self.position_index:
-				continue
-			for f in self.features[s]:
-				for sub in self.features[s][f]:
-					if featuretype == None or sub.featuretype in featuretype:
-						yield sub
+		for seqid in seqids:
+			if seqid not in self.position_index:
+				return #False
+			if (start == None or stop == None) and start != stop:
+				raise Exception()
+			if start == None:
+				start = 0
+			if stop == None:
+				stop = 10e10
+			for f in self.position_index[seqid].search(start,stop):
+				sub = self.features[f.data['ID']]
+				if featuretype == None or sub.featuretype in featuretype:
+					yield sub
 
 	def getseq(self,feature=None,subfeaturetype=None,topfeaturetype=None):
 		if isinstance(feature,basestring):
@@ -143,7 +142,7 @@ class Gff(object):
 
 	def remove(self,key,nested=True):
 		"""
-		Not stable, sometime doesn't remove things?
+		Not stable, sometimes doesn't remove things?
 		"""
 		if isinstance(key,basestring):
 			keys = self[key]
@@ -167,14 +166,13 @@ class Gff(object):
 			for key in keys:
 				nk = [x for x in self.get_children(key,reverse=True)]
 				nestedkeys += nk
-			
 		for k in set(nestedkeys):
-			if k.ID not in self.features[k.seqid]:
-				continue
-			self._typecounts[k.featuretype] -= 1
-			self.features[k.seqid][k.ID].remove(k)
-			if len(self.features[k.seqid][k.ID]) == 0:
-				del self.features[k.seqid][k.ID]
+			self.type_index[k.featuretype].remove(k._key)
+			self.position_index[k.seqid].discard(Interval(k.start,k.end,{'ID':k._key}))
+			self.name_index[k.ID].remove(k._key)
+			if len(self.name_index[k.ID]) == 0:
+				del self.name_index[k.ID]
+			del self.features[k._key]
 		return True
 
 	def names(self,seqid=None, featuretype=None):
@@ -189,23 +187,27 @@ class Gff(object):
 		:param subfeature: GffSubFeature object
 		:return:
 		"""
-		names = [subfeature.ID]
-		#if 'locus_tag' in subfeature.attributes:
-		#	names.append(subfeature.attributes['locus_tag'][0])
-		for name in names:
-			if subfeature.seqid in self.features:
-				if name in self.features[subfeature.seqid]:
-					self.features[subfeature.seqid][name].append(subfeature)
-				else:
-					self.features[subfeature.seqid][name] = [subfeature]
-			else:
-				self.features[subfeature.seqid] = {name:[subfeature]}
-		self._typecounts[subfeature.featuretype] += 1 
+		if not isinstance(subfeature,GffSubPart):
+			raise NotImplementedError()
+		ID = self.uniqueID
+
+		subfeature._key = ID
+
+		self.features[ID] = subfeature
+		self.name_index.setdefault(subfeature.ID,set()).add(ID)
+		self.type_index[subfeature.featuretype].add(ID)
+
+		interval = Interval(subfeature.start,subfeature.end,{'ID':ID})
+		self.position_index.setdefault(subfeature.seqid,IntervalTree()).add(interval)
+		subfeature.container = self
+
 	def make_index(self):
-		for subfeature in self:
-			if subfeature.seqid not in self.index[subfeature.strand]:
-				self.index[subfeature.strand][subfeature.seqid] = blist.sortedlist()
-			self.index[subfeature.strand][subfeature.seqid].update((((subfeature.start,subfeature.end),subfeature.ID),))
+		pass
+
+		#for subfeature in self:
+		#	if subfeature.seqid not in self.index[subfeature.strand]:
+		#		self.index[subfeature.strand][subfeature.seqid] = blist.sortedlist()
+		#	self.index[subfeature.strand][subfeature.seqid].update((((subfeature.start,subfeature.end),subfeature.ID),))
 
 	def set_children(self):
 		"""
@@ -244,15 +246,23 @@ class Gff(object):
 			print type(key),key
 			e = '{0} is not a valid key for Gff.get_children()'.format(key)
 			raise TypeError(e)
+		if featuretype != None:
+			if isinstance(featuretype,basestring) and featuretype in self._featuretypes:
+				featuretype = [featuretype]
+			elif isinstance(featuretype,(list,tuple)):
+				pass
+			else:
+				e = '{0} is not a valid type for featuretype'.format(type(featuretype))
+				raise TypeError(e)
+
 		for k in keys:
-			if not reverse and (featuretype == None or featuretype == k.featuretype):
+			if not reverse and (featuretype == None or k.featuretype in featuretype):
 				yield k
 			for child in k.children:
 				for nested_child in self.get_children(child):
-					if featuretype == None or featuretype == nested_child.featuretype:
+					if featuretype == None or nested_child.featuretype in featuretype:
 						yield nested_child
-		for k in keys:
-			if reverse and (featuretype == None or featuretype == k.featuretype):
+			if reverse and (featuretype == None or k.featuretype in featuretype):
 				yield k
 	#def get_overlap(self,subfeature,stranded=True):
 	def get_overlap(self,seqid,start,end,strand=None,featuretype=None):
@@ -303,6 +313,21 @@ class Gff(object):
 				header = header.next()[1:].strip()
 				seq = ''.join(s.strip() for s in faiter.next())
 				self.seq[header] = seq
+	def write_tbl(self):
+		dic = {}
+		for x in self.getitems(featuretype='gene'):
+			string = ''
+			for y in self.get_children(x,featuretype=['gene','mRNA','CDS']):
+				string += y.stringify(filetype='tbl') + '\n'
+			dic.setdefault(x.seqid,[]).append(string)
+			#print string
+		for s in dic:
+			print '>Feature {0}'.format(s)
+			for t in dic[s]:
+				print t
+		#for uniqueID in self.type_index['gene']:
+		#	gene = self.features[uniqueID]
+		#	print gene.stringify(filetype='tbl')
 
 	def _range_map(self,subfeature):
 		"""
@@ -387,7 +412,6 @@ class Gff(object):
 			return False
 		else:
 			return True
-
 	def fix_orf(self,subfeature,min_len=0):
 		orf = subfeature._find_orf()
 		if not orf:
