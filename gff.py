@@ -2,7 +2,7 @@ __author__ = 'rensholmer'
 
 from .gffsubpart import GffSubPart
 from itertools import groupby #groupby for fasta parsing
-import blist #use sorted list object for indexing
+#import blist #use sorted list object for indexing
 import pprint
 from intervaltree import IntervalTree, Interval
 
