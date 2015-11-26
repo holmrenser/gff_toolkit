@@ -2,6 +2,10 @@
 """
 docstring for testing
 """
+import gffsubpart
+import gff
+import parser
+
 __author__ = 'rensholmer'
 
 def test():
