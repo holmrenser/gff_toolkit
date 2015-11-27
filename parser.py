@@ -1,7 +1,7 @@
 __author__ = 'rensholmer'
 
-from .gff import Gff
-from .gffsubpart import GffSubPart,TranslateError
+from gff import Gff
+from gffsubpart import GffSubPart,TranslateError
 from itertools import groupby
 
 class Parser(object):

@@ -8,8 +8,9 @@ from distutils.core import setup
 
 def main():
 	setup(name='gff_toolkit',
+	      packages = ['gff_toolkit'],
 	      author='rens holmer',
-	      version='0.1',
+	      version='0.1.0',
 	      py_modules=['gff','gffsubpart','parser','test','__init__'],
 	      url='https://github.com/holmrenser/gff_toolkit'
 	      )

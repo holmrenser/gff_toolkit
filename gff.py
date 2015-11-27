@@ -1,6 +1,6 @@
 __author__ = 'rensholmer'
 
-from .gffsubpart import GffSubPart
+from gffsubpart import GffSubPart
 from itertools import groupby #groupby for fasta parsing
 #import blist #use sorted list object for indexing
 import pprint
@@ -65,7 +65,7 @@ class Gff(object):
 			string.append(sub.stringify())
 		return ''.join(string)
 
-	def getitems(self,seqid=None,start=None,stop=None,strand=None,featuretype=None):
+	def getitems(self,seqid=None,start=None,end=None,strand=None,featuretype=None):
 		"""
 		Select based on seqid (scf0002,chr1,etc.) and featuretype (gene,mRNA,etc.)
 		"""
@@ -81,8 +81,8 @@ class Gff(object):
 			if start != None:
 				e = 'Can not provide start when no seqid is provided'
 				raise NotImplementedError(e)
-			elif stop != None:
-				e = 'Can not provide stop when no seqid is provided'
+			elif end != None:
+				e = 'Can not provide end when no seqid is provided'
 				raise NotImplementedError(e)
 			elif strand != None:
 				e = 'Can not provide strand when no seqid is provided'
@@ -103,13 +103,13 @@ class Gff(object):
 		for seqid in seqids:
 			if seqid not in self.position_index:
 				return #False
-			if (start == None or stop == None) and start != stop:
+			if (start == None or end == None) and start != end:
 				raise Exception()
 			if start == None:
 				start = 0
-			if stop == None:
-				stop = 10e10
-			for f in self.position_index[seqid].search(start,stop):
+			if end == None:
+				end = 10e10
+			for f in self.position_index[seqid].search(start,end):
 				sub = self.features[f.data['ID']]
 				if featuretype == None or sub.featuretype in featuretype:
 					yield sub
@@ -247,8 +247,12 @@ class Gff(object):
 			e = '{0} is not a valid key for Gff.get_children()'.format(key)
 			raise TypeError(e)
 		if featuretype != None:
-			if isinstance(featuretype,basestring) and featuretype in self._featuretypes:
-				featuretype = [featuretype]
+			if isinstance(featuretype,basestring):
+				if featuretype in self._featuretypes:
+					featuretype = [featuretype]
+				else:
+					e = '{0} is not a valid featuretype'.format(featuretype)
+					raise TypeError(e)
 			elif isinstance(featuretype,(list,tuple)):
 				pass
 			else:
