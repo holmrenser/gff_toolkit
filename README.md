@@ -3,3 +3,6 @@
 [![PyPI version](https://badge.fury.io/py/gff_toolkit.svg)](https://badge.fury.io/py/gff_toolkit)
 # gff_toolkit
 tools for handling gff files
+
+To install gff_toolkit simply run:
+```pip install gff_toolkit```
