@@ -8,7 +8,6 @@ from distutils.core import setup
 
 def main():
 	setup(name='gff_toolkit',
-	      packages = ['gff_toolkit'],
 	      author='rens holmer',
 	      author_email='rens.holmer@wur.nl',
 	      version='0.1.0',
