@@ -6,3 +6,28 @@ tools for handling gff files
 
 To install gff_toolkit simply run:
 ```pip install gff_toolkit```
+
+
+```python
+#!/usr/bin/python
+"""
+Example on how to reformat manual annotations from Geneious to proper Gff
+"""
+
+__author__ = 'rensholmer'
+
+import sys
+import gff_toolkit as gt
+
+def main(manual_file,author_name):
+	manual_gff = gt.parser(manual_file,filetype='manual',limit=dict(featuretype='CDS',source='Geneious'),author=author_name)
+	for gene in manual_gff.getitems(featuretype='gene'):
+		for subs in manual_gff.get_children(gene):  
+			print subs.stringify().strip()
+
+if __name__ == '__main__':
+	if len(sys.argv) == 3:
+		main(*sys.argv[1:])
+	else:
+		print 'Usage: python {0} <geneious manual annotation gff> <author name>'.format(sys.argv[0])
+```
