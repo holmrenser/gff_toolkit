@@ -7,6 +7,8 @@ tools for handling gff files
 To install gff_toolkit simply run:
 ```pip install gff_toolkit```
 
+To upgrade after a new version run:
+```pip install gff_toolkit --upgrade```
 
 ```python
 #!/usr/bin/python
