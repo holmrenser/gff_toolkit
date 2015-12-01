@@ -9,6 +9,8 @@ class SeqError(Exception):
 	pass
 class CoordinateError(Exception):
 	pass
+class IDError(Exception):
+	pass
 
 class GffSubPart(object):
 	"""
@@ -41,16 +43,18 @@ class GffSubPart(object):
 		self._seq = ''
 		self._key = None #Unique ID
 		self.container = None # This will be a Gff object so that the GffSubFeature can find its child/parent objects
-		if len(args) == 9:
+		if len(args) >= 8:
 			self.seqid = args[0]
 			self.source = args[1]
 			self.featuretype = args[2]
 			self.start = min(int(args[3]),int(args[4]))#int(args[3])
 			self.end = max(int(args[3]),int(args[4]))#int(args[4])
 			if not self.end > self.start:
-				e = 'End must be larger than Start: {0}\t{1}\t{2}'.format(self.seqid,self.start,self.end)
-				#raise CoordinateError(e)#,[self.seqid,self.start,self.end]
-				self.end += 1
+				if kwargs.get('strict',False):
+					e = 'End must be larger than Start: {0}\t{1}\t{2}'.format(self.seqid,self.start,self.end)
+					raise CoordinateError(e)#,[self.seqid,self.start,self.end]
+				else:
+					self.end += 1
 			if args[5] == '.':
 				self.score = args[5]
 			else:
@@ -60,18 +64,25 @@ class GffSubPart(object):
 				self.phase = args[7]
 			else:
 				self.phase = int(args[7])
-			att = args[8].split(';')
-			self.attributes = { a.split('=')[0]: a.split('=')[1].split(',') for a in att}
+			self.attributes = {}
 		elif len(args) > 0:
 			e = 'Line is not proper gff: ' + '\t'.join(args)
 			raise AttributeError(e)
-		if 'ID' in self.attributes:
-			self.ID = self.attributes['ID'][0]
+		if len(args) == 9:
+			att = args[8].split(';')
+			self.attributes = { a.split('=')[0]: a.split('=')[1].split(',') for a in att}
 		self.ID = self.attributes.get('ID',[None])[0]
 		if not self.ID:
 			if kwargs.get('strict',False):
 				e = 'No ID found in attributes: ' + '\t'.join(args)
 				raise AttributeError(e)
+			elif kwargs.get('filetype','standard') == 'manual':
+				newID = self.attributes.get('Name',False)
+				if newID:
+					self.ID = newID[0]
+				else:
+					e = 'Cannot process manual annotation without Name and ID: {0}'.format(self.stringify().strip())
+					raise IDError(e)
 			else:
 				self.ID = '{0}.{1}'.format(self.attributes['Parent'][0],self.featuretype)
 		for parent in self.attributes.get('Parent',[]):
