@@ -26,7 +26,7 @@ class Gff(object):
 		self._uniqueID = 0
 		self.filename = kwargs.get('filename','')
 		self.name_index = {} #dict with {ID:set(uniqueID1,uniqueID2,),..} to access features based on non unique ID
-		self.position_index = {}#bx.intervaltree
+		self.position_index = {}#Intervaltree
 		self.type_index = {l:set() for l in self._featuretypes} #dict with {featuretype:set(uniqueID1,uniqueID2,),...} to access features based on featuretype
 	def __iter__(self):
 		"""
@@ -102,7 +102,7 @@ class Gff(object):
 
 		for seqid in seqids:
 			if seqid not in self.position_index:
-				return #False
+				continue #False
 			if (start == None or end == None) and start != end:
 				raise Exception()
 			if start == None:
@@ -111,8 +111,9 @@ class Gff(object):
 				end = 10e10
 			for f in self.position_index[seqid].search(start,end):
 				sub = self.features[f.data['ID']]
-				if featuretype == None or sub.featuretype in featuretype:
+				if (featuretype == None or sub.featuretype in featuretype) and (strand == None or sub.strand == strand):
 					yield sub
+		return
 
 	def getseq(self,feature=None,subfeaturetype=None,topfeaturetype=None):
 		if isinstance(feature,basestring):

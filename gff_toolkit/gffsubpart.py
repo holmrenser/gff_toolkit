@@ -58,7 +58,7 @@ class GffSubPart(object):
 			if args[5] == '.':
 				self.score = args[5]
 			else:
-				self.score = int(args[5])
+				self.score = float(args[5])
 			self.strand = args[6]
 			if args[7] == '.':
 				self.phase = args[7]

@@ -164,9 +164,11 @@ class Parser(object):
 		assert all(x.source == first.source for x in subslist)
 		assert all(x.strand == first.strand for x in subslist)
 		try:
-			assert all(x.attributes['Name'] == first.attributes['Name'] for x in subslist)
+			assert all(x.attributes['Name'] == first.attributes['Name'] for x in subslist),[x.attributes['Name'] for x in subslist]
 		except KeyError as e:
 			print first
+			raise e
+		except AssertionError as e:
 			raise e
 		try:
 			pass
@@ -187,7 +189,8 @@ class Parser(object):
 				remove.append(feature.ID)
 				continue
 			if pep[0] != 'M':
-				remove.append(feature.ID)
+				if feature.seq[0:3] != 'CTG':
+					remove.append(feature.ID)
 			elif pep[-1] != '*':
 				remove.append(feature.ID)
 			elif '*' in pep[1:-1]:
