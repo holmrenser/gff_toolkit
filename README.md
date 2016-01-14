@@ -1,8 +1,11 @@
 [![Build Status](https://travis-ci.org/holmrenser/gff_toolkit.svg)](https://travis-ci.org/holmrenser/gff_toolkit)
 [![Coverage Status](https://coveralls.io/repos/holmrenser/gff_toolkit/badge.svg?branch=master&service=github)](https://coveralls.io/github/holmrenser/gff_toolkit?branch=master)
 [![PyPI version](https://badge.fury.io/py/gff_toolkit.svg)](https://badge.fury.io/py/gff_toolkit)
+[![Documentation Status](https://readthedocs.org/projects/gff-toolkit/badge/?version=latest)](http://gff-toolkit.readthedocs.org/en/latest/?badge=latest)
 # gff_toolkit
-tools for handling gff files
+Tools for handling gff files
+
+Read the [documentation](http://gff-toolkit.readthedocs.org/)
 
 To install gff_toolkit simply run:
 ```pip install gff_toolkit```
