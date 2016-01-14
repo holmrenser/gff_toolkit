@@ -58,7 +58,10 @@ class Gff(object):
 	
 	def stringify(self):
 		"""
-		Returns entire object as gff formatted string
+		Args:
+			None
+		Returns:
+			Entire Gff object as gff formatted string
 		"""
 		string = []
 		for sub in self:
@@ -67,7 +70,10 @@ class Gff(object):
 
 	def getitems(self,seqid=None,start=None,end=None,strand=None,featuretype=None):
 		"""
-		Select based on seqid (scf0002,chr1,etc.) and featuretype (gene,mRNA,etc.)
+		Args:
+			seqid: blabla
+		Returns:
+			GffSubPart
 		"""
 		if featuretype != None:
 			if isinstance(featuretype,basestring) and featuretype in self._featuretypes:
@@ -89,11 +95,7 @@ class Gff(object):
 				raise NotImplementedError(e)
 			else:
 				seqids = self.position_index.keys()
-				#for f in featuretype:
-				#	for uniqueID in self.type_index[f]:
-				#		sub = self.features[uniqueID]
-				#		if f == None or sub.featuretype in f:
-				#			yield sub
+
 		elif not isinstance(seqid,basestring):
 			e = '{0} is not a valid type for seqid'.format(type(seqid))
 			raise TypeError(e)
@@ -116,6 +118,12 @@ class Gff(object):
 		return
 
 	def getseq(self,feature=None,subfeaturetype=None,topfeaturetype=None):
+		"""
+		Args:
+			feature: None
+		Returns:
+			None
+		"""
 		if isinstance(feature,basestring):
 			features = self[feature]
 		elif isinstance(feature,GffSubPart):
@@ -127,7 +135,6 @@ class Gff(object):
 
 		for f in features:
 			if f.seq:
-				print f.ID,'allready has seq!'
 				f.seq = ''
 			if f.strand == '+':
 				reverse = False
@@ -143,8 +150,13 @@ class Gff(object):
 
 	def remove(self,key,nested=True):
 		"""
-		Not stable, sometimes doesn't remove things?
+		Args:
+			key: string or GffSubPart or list
+			nested: bool
+		Returns:
+			None
 		"""
+		#print 'remove', key.stringify()
 		if isinstance(key,basestring):
 			keys = self[key]
 		elif isinstance(key,GffSubPart):
@@ -167,18 +179,37 @@ class Gff(object):
 			for key in keys:
 				nk = [x for x in self.get_children(key,reverse=True)]
 				nestedkeys += nk
+		else:
+			nestedkeys = keys
+
+		remove_parents = set()
+
 		for k in set(nestedkeys):
 			self.type_index[k.featuretype].remove(k._key)
 			self.position_index[k.seqid].discard(Interval(k.start,k.end,{'ID':k._key}))
 			self.name_index[k.ID].remove(k._key)
 			if len(self.name_index[k.ID]) == 0:
 				del self.name_index[k.ID]
+			parents = (pp for p in k.parents for pp in self[p])
+			for p in parents:
+				if k.ID not in self.name_index:
+					p.children.remove(k.ID)
+				if not p.children:
+					remove_parents.add(p)
+					#self.remove(p,nested=False)
 			del self.features[k._key]
+		if remove_parents:
+			self.remove(list(remove_parents),nested=False)
+
 		return True
 
 	def names(self,seqid=None, featuretype=None):
 		"""
-		:return:
+		Args:
+			seqid: None
+			featuretype: None
+		returns:
+			ID
 		"""
 		for f in self.getitems(seqid=seqid,featuretype=featuretype):
 			yield f.ID
@@ -217,6 +248,7 @@ class Gff(object):
 		"""
 		for sub in self:
 			for p_name in sub.parents:
+				#print sub.ID,p_name
 				for p_obj in self[p_name]:
 					if sub.ID not in p_obj.children:
 						p_obj.children.append(sub.ID)
@@ -272,6 +304,7 @@ class Gff(object):
 	#def get_overlap(self,subfeature,stranded=True):
 	def get_overlap(self,seqid,start,end,strand=None,featuretype=None):
 		"""
+		obsolete, use getitems()
 		Returns all subfeatures of featuretype that 
 		"""
 		if seqid not in self.features:
@@ -355,7 +388,7 @@ class Gff(object):
 			genome_range = range(c.get_start(),c.get_end()+step,step)
 			x = {a:b for a,b in zip(mrna_range,genome_range)}
 			range_map.update(x)
-			pos += c.end - c.start  + 1
+			pos += c.end - c.start + 1
 		return range_map
 
 	def _change_cds(self,subfeature,genome_orf):
@@ -371,32 +404,34 @@ class Gff(object):
 		children = self.get_children(subfeature,featuretype='CDS')
 		forward = subfeature.strand == '+'
 		if forward:
-			s1 = genome_orf[0]
-			s2 = genome_orf[1]
-			children = sorted(children,key=lambda x: x.start)
+			new_start = genome_orf[0]
+			new_end = genome_orf[1]
+			children = sorted(children,key=lambda x: x.get_start())
 		else:
-			s1 = genome_orf[1]
-			s2 = genome_orf[0]
-			children = sorted(children,key=lambda x: x.end, reverse=True)
+			new_start = genome_orf[1]
+			new_end = genome_orf[0]
+			children = sorted(children,key=lambda x: x.get_start(), reverse=True)
 		for c in children:
-			c1 = c.get_start()
-			c2 = c.get_end()
+			old_start = c.get_start()
+			old_end = c.get_end()
 
-			forward_start =  c1 <= s1 <= c2
-			forward_stop = c1 <= s2 <= c2
-			reverse_start = c1 >= s1 >= c2
-			reverse_stop = c1 >= s2 >= c2
+			forward_start = old_start <= new_start <= old_end
+			forward_stop = old_start <= new_end <= old_end
+			reverse_start = old_start >= new_start >= old_end
+			reverse_stop = old_start >= new_end >= old_end
 
 			#change start
 			if (forward and forward_start) or (not forward and reverse_start) and not found_stop:
-				print 'FOUND START',(c1,s1,c2)
-				c.set_start(s1)
-				print c.start,c.end
-				print c.seq[c.start-1:c.end]
+				#print 'FOUND START',(old_start,new_start,old_end)
+				#print c.get_start()
+				c.set_start(new_start)
+				#print c.get_start()
+				#print c.start,c.end
+				#print self.seq[c.seqid][c.start-1:c.end]
 				found_start = True
 			#change stop and continue loop from the top
 			if (forward and forward_stop) or (not forward and reverse_stop) and found_start and not found_stop:
-				c.set_end(s2)
+				c.set_end(new_end)
 				found_stop = True
 				#remove zero length exons
 				if c.start == c.end:
@@ -432,6 +467,6 @@ class Gff(object):
 		if not genome_orf:
 			return False
 		change = self._change_cds(subfeature,genome_orf)
-		print 'changed',change
+		#print 'changed',change
 		return change
 

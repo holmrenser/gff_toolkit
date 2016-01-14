@@ -36,13 +36,14 @@ class GffSubPart(object):
 		self.score = None
 		self.strand = None
 		self.phase = None
-		self.parents = [] # list of GffSubPart IDs
+		#self.parents = [] # list of GffSubPart IDs
 		self.children = [] #list of GffSubPart IDs
 		self.comments = None #Not implemented
 		self._pep = ''
 		self._seq = ''
 		self._key = None #Unique ID
 		self.container = None # This will be a Gff object so that the GffSubFeature can find its child/parent objects
+		self.attributes = {}
 		if len(args) >= 8:
 			self.seqid = args[0]
 			self.source = args[1]
@@ -64,14 +65,22 @@ class GffSubPart(object):
 				self.phase = args[7]
 			else:
 				self.phase = int(args[7])
-			self.attributes = {}
 		elif len(args) > 0:
 			e = 'Line is not proper gff: ' + '\t'.join(args)
 			raise AttributeError(e)
 		if len(args) == 9:
 			att = args[8].split(';')
-			self.attributes = { a.split('=')[0]: a.split('=')[1].split(',') for a in att}
-		self.ID = self.attributes.get('ID',[None])[0]
+			for a in att:
+				key = a.split('=')[0]
+				values = a.split('=')[1].split(',')
+				
+				for value in values:
+					#print key,value
+					self.attributes.setdefault(key,[]).append(value)
+				#self.attributes[key].append()
+			#self.attributes = { a.split('=')[0]: a.split('=')[1].split(',') for a in att}
+		#self.ID = self.attributes.get('ID',[None])[0]
+		#print self.ID
 		if not self.ID:
 			if kwargs.get('strict',False):
 				e = 'No ID found in attributes: ' + '\t'.join(args)
@@ -85,8 +94,8 @@ class GffSubPart(object):
 					raise IDError(e)
 			else:
 				self.ID = '{0}.{1}'.format(self.attributes['Parent'][0],self.featuretype)
-		for parent in self.attributes.get('Parent',[]):
-			self.parents.append(parent)
+		#for parent in self.attributes.get('Parent',[]):
+		#	self.parents.append(parent)
 		#self._key = (self.ID,self.seqid,self.start,self.end,self.strand)
 	def __str__(self):
 		"""
@@ -123,32 +132,24 @@ class GffSubPart(object):
 		else:
 			e = 'Cannot compare GffSubPart to object of type {0}'.format(type(other))
 			raise NotImplementedError(e)
-	def stringify(self,filetype='gff'):
-		"""
-		Return gff style tab separated string 
-		"""
-		if filetype not in self._filetypes:
-			e = '{0} is not a valid filetype'.format(filetype)
+	
+	@property
+	def ID(self):
+		return self.attributes.get('ID',[None])[0]
+	@ID.setter
+	def ID(self,value):
+		self.attributes['ID'] = [value]
+	
+	@property
+	def parents(self):
+		return self.attributes.get('Parent',[])
+	@parents.setter
+	def parents(self,value):
+		if not isinstance(value,(tuple,list)):
+			e = '{0} is not a valid type for parents property'.format(type(value))
 			raise TypeError(e)
-		if filetype == 'gff':
-			s = (self.seqid,self.source,self.featuretype,self.start,self.end,self.score,self.strand,self.phase)
-			s = (str(x) for x in s)
-			s = '\t'.join(s)
-			a = []
-			for key,value in self.attributes.iteritems():
-				a.append('{0}={1}'.format(key,','.join(value)))
-			a = ';'.join(a)
-			return '{0}\t{1}\n'.format(s,a)
-		elif filetype == 'tbl':
-			lines = ['{0}\t{1}\t{2}'.format(self.start,self.end,self.featuretype)]
-			if self.featuretype == 'gene':
-				name = self.attributes.get('Name',False)[0]
-				if name:
-					lines.append('\t\t\tgene\t{0}'.format(name))
-				lines.append('\t\t\tlocus_tag\t{0}'.format(self.ID))
-			elif self.featuretype in ['mRNA','CDS']:
-				lines.append('\t\t\tproduct\tNone')
-			return '\n'.join(lines)
+		self.attributes['Parent'] = value
+	
 	@property
 	def seq(self):
 		return self._seq
@@ -174,8 +175,34 @@ class GffSubPart(object):
 	@pep.deleter
 	def pep(self):
 		self._pep = ''
-
-	def set_attribute(self,key,value):
+	
+	def stringify(self,filetype='gff'):
+		"""
+		Return gff style tab separated string 
+		"""
+		if filetype not in self._filetypes:
+			e = '{0} is not a valid filetype'.format(filetype)
+			raise TypeError(e)
+		elif filetype == 'gff':
+			s = (self.seqid,self.source,self.featuretype,self.start,self.end,self.score,self.strand,self.phase)
+			s = (str(x) for x in s)
+			s = '\t'.join(s)
+			a = []
+			for key,value in self.attributes.iteritems():
+				a.append('{0}={1}'.format(key,','.join(value)))
+			a = ';'.join(a)
+			return '{0}\t{1}\n'.format(s,a)
+		elif filetype == 'tbl':
+			lines = ['{0}\t{1}\t{2}'.format(self.start,self.end,self.featuretype)]
+			if self.featuretype == 'gene':
+				name = self.attributes.get('Name',False)[0]
+				if name:
+					lines.append('\t\t\tgene\t{0}'.format(name))
+				lines.append('\t\t\tlocus_tag\t{0}'.format(self.ID))
+			elif self.featuretype in ['mRNA','CDS']:
+				lines.append('\t\t\tproduct\tNone')
+			return '\n'.join(lines)
+	def setattribute(self,key,value):
 		if isisintance(value,basestring):
 			self.attributes.setdefault(key,[]).append(value)
 		elif hasattr(value,'__iter__'):
@@ -234,7 +261,9 @@ class GffSubPart(object):
 			codons = re.findall('...',frame)
 			starts = [index * 3 for index,codon in enumerate(codons) if codon == 'ATG']
 			if not starts:
-				continue
+				starts = [index * 3 for index,codon in enumerate(codons) if codon == 'CTG']
+				if not starts:
+					continue
 			stops = [index * 3 for index,codon in enumerate(codons) if codon in ['TAA','TGA','TAG']]
 			if not stops:
 				continue

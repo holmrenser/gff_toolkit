@@ -22,15 +22,21 @@ class Parser(object):
 		self.filetype = filetype
 		self.fasta_file = fasta_file
 		self.remove_noncoding = remove_noncoding
-		if limit != None:
+		if limit:
 			if not isinstance(limit,dict):
 				e = '{0} is not a valid type for limit'.format(type(limit))
 				raise TypeError(e)
 			else:
 				#reformat limit values into lists if they are not already lists
-				self.limit = {key:[value] for key,value in limit.iteritems() if isinstance(value,basestring)}
+				self.limit = {}
+				for key,value in limit.iteritems():
+					if isinstance(value,(list,tuple)):
+						self.limit[key] = value
+					elif isinstance(value,basestring):
+						self.limit[key] = [value]
+				#self.limit = {key:[value] for key,value in limit.iteritems() if isinstance(value,basestring) or if isinstance(value,(list,tuple))}
 		else:
-			self.limit = None
+			self.limit = limit
  		self.gff = Gff(filename=gff_file)
  		self.author = author
 		#self.parsed = False
@@ -44,7 +50,9 @@ class Parser(object):
 				if line[0] == '#' or not line.strip():
 					continue
 				parts = line.strip().split('\t')
+				#print parts
 				if self.limit != None:
+					#print self.limit
 					#Series of list comprehensions to check if any of the relevant attributes of sub are in the limit dictionary
 					#An empty list is falsy, so if the relevant value is not in the limit dictionary, continue to the next line
 					if not [x for x in self.limit.get('seqid',[parts[0]]) if x == parts[0]]:
@@ -56,6 +64,7 @@ class Parser(object):
 					elif not [x for x in self.limit.get('strand',[parts[6]]) if x == parts[6]]:
 						continue
 				sub = GffSubPart(*parts,filetype=self.filetype)
+				#print sub.stringify().strip()
 				yield sub
 	def _ratt(self):
 		remove = []
