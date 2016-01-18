@@ -2,7 +2,6 @@ __author__ = 'rensholmer'
 
 from gffsubpart import GffSubPart
 from itertools import groupby #groupby for fasta parsing
-#import blist #use sorted list object for indexing
 import pprint
 from intervaltree import IntervalTree, Interval
 
@@ -23,6 +22,7 @@ class Gff(object):
 		self.features = {} #dict with {uniqueID1:feature1,uniqueID2:feature2,...}   OLD:{seqid:[GffSubPart1,GffSubPart2,etc]}
 		self.seq = {} #sequencedict with {header:seq}
 		#self._typecounts = {l:0 for l in self._featuretypes}
+		self._removedkeys = set()
 		self._uniqueID = 0
 		self.filename = kwargs.get('filename','')
 		self.name_index = {} #dict with {ID:set(uniqueID1,uniqueID2,),..} to access features based on non unique ID
@@ -105,14 +105,13 @@ class Gff(object):
 		for seqid in seqids:
 			if seqid not in self.position_index:
 				continue #False
-			if (start == None or end == None) and start != end:
+			if start == None and end == None:
+				subs = (self.features[_key] for _key in (interval.data['_key'] for interval in self.position_index[seqid].items()) if _key not in self._removedkeys)
+			elif (start == None and end != None) or (start != None and end == None):
 				raise Exception()
-			if start == None:
-				start = 0
-			if end == None:
-				end = 10e10
-			for f in self.position_index[seqid].search(start,end):
-				sub = self.features[f.data['ID']]
+			else:
+				subs = (self.features[_key] for _key in (interval.data['_key'] for interval in self.position_index[seqid].search(start,end)) if _key not in self._removedkeys)
+			for sub in subs:
 				if (featuretype == None or sub.featuretype in featuretype) and (strand == None or sub.strand == strand):
 					yield sub
 		return
@@ -175,18 +174,15 @@ class Gff(object):
 			e = '{0} is not a valid type'.format(key)
 			raise TypeError(e)
 		if nested:
-			nestedkeys = []
-			for key in keys:
-				nk = [x for x in self.get_children(key,reverse=True)]
-				nestedkeys += nk
+			nestedkeys = {nestedkey for key in keys for nestedkey in self.get_children(key)}
 		else:
-			nestedkeys = keys
+			nestedkeys = set(keys)
 
 		remove_parents = set()
-
-		for k in set(nestedkeys):
+		for k in nestedkeys:
 			self.type_index[k.featuretype].remove(k._key)
-			self.position_index[k.seqid].discard(Interval(k.start,k.end,{'ID':k._key}))
+			self.position_index[k.seqid].removei(k.start,k.end,{'_key':k._key})
+			#self.position_index[k.seqid].remove(Interval(k.start,k.end,{'_key':k._key}))
 			self.name_index[k.ID].remove(k._key)
 			if len(self.name_index[k.ID]) == 0:
 				del self.name_index[k.ID]
@@ -198,21 +194,11 @@ class Gff(object):
 					remove_parents.add(p)
 					#self.remove(p,nested=False)
 			del self.features[k._key]
+			self._removedkeys.add(k._key)
 		if remove_parents:
 			self.remove(list(remove_parents),nested=False)
 
 		return True
-
-	def names(self,seqid=None, featuretype=None):
-		"""
-		Args:
-			seqid: None
-			featuretype: None
-		returns:
-			ID
-		"""
-		for f in self.getitems(seqid=seqid,featuretype=featuretype):
-			yield f.ID
 
 	def update(self,subfeature):
 		"""
@@ -229,17 +215,9 @@ class Gff(object):
 		self.name_index.setdefault(subfeature.ID,set()).add(ID)
 		self.type_index[subfeature.featuretype].add(ID)
 
-		interval = Interval(subfeature.start,subfeature.end,{'ID':ID})
+		interval = Interval(subfeature.start,subfeature.end,{'_key':ID})
 		self.position_index.setdefault(subfeature.seqid,IntervalTree()).add(interval)
 		subfeature.container = self
-
-	def make_index(self):
-		pass
-
-		#for subfeature in self:
-		#	if subfeature.seqid not in self.index[subfeature.strand]:
-		#		self.index[subfeature.strand][subfeature.seqid] = blist.sortedlist()
-		#	self.index[subfeature.strand][subfeature.seqid].update((((subfeature.start,subfeature.end),subfeature.ID),))
 
 	def set_children(self):
 		"""
@@ -301,45 +279,7 @@ class Gff(object):
 						yield nested_child
 			if reverse and (featuretype == None or k.featuretype in featuretype):
 				yield k
-	#def get_overlap(self,subfeature,stranded=True):
-	def get_overlap(self,seqid,start,end,strand=None,featuretype=None):
-		"""
-		obsolete, use getitems()
-		Returns all subfeatures of featuretype that 
-		"""
-		if seqid not in self.features:
-			#trick to end generator if searching for unknown seqid
-			return
-		if start > end:
-			e = 'start cannot be bigger than end, start: {0} -- end: {1}'.format(start,end)
-			raise ValueError(e)
-		if strand:
-			if strand not in ['+','-']:
-				e = '{0} is not a valid strand'.format(strand)
-			strands = [strand]
-		else:
-			strands = ['+','-']
-		
-		for strand in strands:
-			found = 0
-			if seqid not in self.index[strand]:
-				continue
-			for i in self.index[strand][seqid]:
-				if found > 0:
-					break
-				for ii in self[i[1]]:
-					if featuretype == None:
-						pass
-					elif ii.featuretype != featuretype:
-						continue
-					if start <= ii.start <= end or start <= ii.end <= end:
-						found += 1
-						yield ii
-					elif ii.start <= start <= ii.end or ii.start <= end <= ii.end:
-						found += 1
-						yield ii
-					elif found > 0:
-						break
+
 	def add_fasta(self,filename):
 		"""
 		:param filehandle: fasta formatted DNA sequence file
@@ -351,7 +291,13 @@ class Gff(object):
 				header = header.next()[1:].strip()
 				seq = ''.join(s.strip() for s in faiter.next())
 				self.seq[header] = seq
+
 	def write_tbl(self):
+		"""
+		Args: None
+		Return:
+			.tbl formatted string
+		"""
 		dic = {}
 		for x in self.getitems(featuretype='gene'):
 			string = ''
@@ -422,20 +368,16 @@ class Gff(object):
 
 			#change start
 			if (forward and forward_start) or (not forward and reverse_start) and not found_stop:
-				#print 'FOUND START',(old_start,new_start,old_end)
-				#print c.get_start()
-				c.set_start(new_start)
-				#print c.get_start()
-				#print c.start,c.end
-				#print self.seq[c.seqid][c.start-1:c.end]
 				found_start = True
+				c.set_start(new_start)
+				
 			#change stop and continue loop from the top
 			if (forward and forward_stop) or (not forward and reverse_stop) and found_start and not found_stop:
-				c.set_end(new_end)
 				found_stop = True
-				#remove zero length exons
-				if c.start == c.end:
+				if c.get_start() == new_end:
 					remove.append(c)
+					continue
+				c.set_end(new_end)
 				continue
 			#remove zero length exons
 			if c.start == c.end:
@@ -446,13 +388,25 @@ class Gff(object):
 			#remove exon after stop
 			if found_stop and found_start:
 				remove.append(c)
-		self.remove(remove)
+		if remove:
+			self.remove(remove,nested=False)
 		self.getseq(subfeature,topfeaturetype=subfeature.featuretype,subfeaturetype='CDS')
-		if len(subfeature.seq) < 6 or len(subfeature.seq) % 3 != 0:
-			return False
-		else:
-			return True
-	def fix_orf(self,subfeature,min_len=0):
+		assert len(subfeature.seq) >= 6,(len(subfeature.seq),subfeature.seq)
+		assert len(subfeature.seq) % 3 == 0,(len(subfeature.seq),subfeature.seq)
+		return True
+
+	def fix_orf(self,subfeature,starts=('ATG','CTG'),stops=('TAA','TGA','TAG'),min_len=6):
+		"""
+		Finds longest ORF in spliced transcript.
+
+		Args:
+			subfeature: class: GffSubPart()
+			starts: list/tuple with start codons
+			stops: list/tuple with stop codons
+			min_len: minimum ORF length
+		Returns:
+			True if ORF is found
+		"""
 		orf = subfeature._find_orf()
 		if not orf:
 			return False
@@ -467,6 +421,5 @@ class Gff(object):
 		if not genome_orf:
 			return False
 		change = self._change_cds(subfeature,genome_orf)
-		#print 'changed',change
 		return change
 

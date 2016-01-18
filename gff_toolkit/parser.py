@@ -234,7 +234,7 @@ class Parser(object):
 			self.gff.getseq(topfeaturetype='mRNA',subfeaturetype='CDS')
 		if self.remove_noncoding:
 			self._remove_noncoding()			
-		self.gff.make_index()
+		#self.gff.make_index()
 		self.parsed = True
 		return self.gff
 
