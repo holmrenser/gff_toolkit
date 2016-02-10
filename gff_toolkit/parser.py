@@ -66,54 +66,80 @@ class Parser(object):
 				sub = GffSubPart(*parts,filetype=self.filetype)
 				#print sub.stringify().strip()
 				yield sub
+
 	def _ratt(self):
-		remove = []
-		featuremap = {}
-		childmap = {}
-		for feature in self.gff.getitems(featuretype='mRNA'):
-			oldID = feature.ID
-			newID = feature.attributes['locus_tag'][0]
-			if oldID == newID:
+		name_index_map = {}
+		name_index_remove = set()
+		child_map = {}
+		
+		for transcript in self.gff.getitems(featuretype='mRNA'):
+			new_transcript_ID = transcript.attributes['locus_tag'][0]
+			if transcript.ID == new_transcript_ID:
 				continue
-			if newID not in childmap:
-				childmap[newID] = []
 
-			if oldID not in featuremap:
-				featuremap.setdefault(newID,set()).add(feature.ID)
-			else:
-				raise ValueError('old ID already exists!')
+			child_map.setdefault(new_transcript_ID,[])
 
-			for subfeature in self.gff.get_children(feature,featuretype='CDS'):
-				subfeature.parents = [newID]
-				oldsubID = subfeature.ID
-				newsubID = '{0}.{1}'.format(newID,subfeature.featuretype)
-				if newsubID not in childmap[newID]:
-					childmap[newID].append(newsubID)
-				featuremap.setdefault(newsubID,set()).add(oldsubID)
+			name_index_map[new_transcript_ID] = transcript._key
+			name_index_remove.add(transcript.ID)
+			
+			#if transcript.ID not in featuremap:
+			#	featuremap.setdefault(new_transcript_ID,set()).add(transcript.ID)
+			#else:
+			#	raise ValueError('old ID already exists!')
 
-				subfeature.ID = newsubID
-				subfeature.attributes['ID'] = [newsubID]
-				subfeature.attributes['Parent'] = [newID]
-				subfeature.source = 'ratt'
-			feature.ID = newID
-			feature.source = 'ratt'
-			feature.attributes['ID'] = [newID]
-			try:
-				del feature.attributes['featflags']
-			except:
-				pass
-			del feature.attributes['locus_tag']
-			del feature.attributes['gene']
-			del feature.attributes['transl_table']
+			sub_counter = {}
+			for sub in self.gff.get_children(transcript):
+				if sub == transcript:
+					continue
+				sub_counter.setdefault(sub.featuretype,0)
+				sub_counter[sub.featuretype] += 1
 				
-		for x in featuremap:
-			for y in featuremap[x]:
-				self.gff.name_index[x] = self.gff.name_index[y]
-			for y in featuremap[x]:
-				self.gff.name_index.pop(y,set())
-		for c in childmap:
-			for t in self.gff[c]:
-				t.children = childmap[c]
+				sub.parents = [new_transcript_ID]
+				#old_sub_ID = sub.ID
+				new_sub_ID = '{0}.{1}{2}'.format(new_transcript_ID,sub.featuretype,sub_counter[sub.featuretype])
+				
+				child_map.setdefault(new_transcript_ID,[]).append(new_sub_ID)
+				name_index_map[new_sub_ID] = sub._key
+				name_index_remove.add(sub.ID)
+
+				#featuremap.setdefault(newsubID,set()).add(oldsubID)
+
+				sub.ID = new_sub_ID
+				sub.source = 'ratt'
+
+			transcript.ID = new_transcript_ID
+			transcript.source = 'ratt'
+			transcript.attributes = {key:value for key,value in transcript.attributes.iteritems() if key in ('ID','Parent')}
+
+			gene_ID = [x for x in self._get_lower_ratt_ids(transcript.ID)][-1][:-2]
+			
+			if not gene_ID in self.gff.name_index:
+				gene_parts = transcript.gff_fields
+				gene = GffSubPart(*gene_parts)
+				gene.featuretype = 'gene'
+				gene.ID = gene_ID
+				gene.children = [transcript.ID]
+				self.gff.update(gene)
+			else:
+				for gene in self.gff[gene_ID]:
+					gene.children.append(transcript.ID)
+
+			transcript.parents = [gene_ID]
+
+		for new_name,_key in name_index_map.iteritems():
+			self.gff.name_index[new_name] = [_key]
+		for old_name in name_index_remove:
+			self.gff.name_index.pop(old_name)
+		#for x in featuremap:
+		#	for y in featuremap[x]:
+		#		print x,y
+		#		self.gff.name_index[x] = self.gff.name_index[y]
+		#	for y in featuremap[x]:
+		#		self.gff.name_index.pop(y,None)
+		for parent_id in child_map:
+			for parent in self.gff[parent_id]:
+				parent.children = child_map[parent_id]
+
 	def _manual(self):
 		ann = {}
 		for sub in self.gff.getitems(featuretype='CDS'):
@@ -207,20 +233,71 @@ class Parser(object):
 		print 'Remove {0} genes because they do not encode a protein'.format(len(remove))
 		self.gff.remove(remove)
 
-	def _remove_partial(self):
-		#print '_remove_partial()'
-		remove = []
-		for feature in self.gff.getitems(featuretype='mRNA'):
-			if feature.attributes['partial'][0] == 'True':
-				remove.append(feature.ID)
-		#print 'Remove {0} genes because they are a partial transfer'.format(len(remove))
+	def _get_nested_ratt_ids(self,ID):
+		IDs = set()
+		for lower_ID in self._get_lower_ratt_ids(ID):
+			IDs.add(lower_ID)
+			yield lower_ID
+		for higher_ID in self._get_higher_ratt_ids(ID):
+			if higher_ID not in IDs:
+				yield higher_ID
+
+	def _get_lower_ratt_ids(self,ID):
+		yield ID
+		if ID[-4] != '.':
+			return
+		for sub_ID in self._get_lower_ratt_ids(ID[:-2]):
+			yield sub_ID
+
+	def _get_higher_ratt_ids(self,ID):
+		yield ID
+		counter = int(ID[-1])
+		new_ID = '{0}.{1}'.format(ID,counter + 1)
+		if new_ID not in self.gff:
+			return
+		for super_ID in self._get_higher_ratt_ids(new_ID):
+			yield super_ID
+
+	def _remove_fragmented_ratt(self):
+		remove = set()
+		ID_map = {}
+		for transcript in self.gff.getitems(featuretype='mRNA'):
+			if transcript.ID in remove:
+				continue
+			if transcript.ID[-4] == '.':
+				#get all fragments
+				fragments = (ff for f in self._get_nested_ratt_ids(transcript.ID) for ff in self.gff[f])
+				#sort fragments by CDS length
+				sorted_fragments = sorted(fragments,key = lambda x:len(x.seq))
+				#remove the longest fragment from the list so it doesnt get removed
+				longest = sorted_fragments.pop()
+				#remove all the other fragments	
+				remove |= {f.ID for f in sorted_fragments}#set(sorted_fragments)
+				#make sure longest fragment keeps the original name
+				transcript_ID = [ID for ID in self._get_nested_ratt_ids(longest.ID) if ID[-4] != '.'][0]
+				ID_map[longest.ID] = transcript_ID
+				#set ID and Parent attribute of nested CDS features
+				sub_counter = {}
+				for sub in self.gff.get_children(longest):
+					if sub == longest:
+						continue
+					sub.attributes['Parent'] = [transcript_ID]
+					sub_counter.setdefault(sub.featuretype,0)
+					sub_counter[sub.featuretype] += 1
+					sub_ID = '{0}.{1}{2}'.format(transcript_ID,sub.featuretype,sub_counter[sub.featuretype])
+					ID_map[sub.ID] = sub_ID
 		self.gff.remove(remove)
+		for old_ID,new_ID in ID_map.iteritems():
+			assert old_ID not in remove,(old_ID,new_ID)
+			for feature in self.gff[old_ID]:
+				feature.ID = new_ID
 
 	def parse(self):
+		self.remove_fragmented_ratt = False
 		for subpart in self._readlines():
 			self.gff.update(subpart)
-		
 		if self.filetype == 'ratt':
+			self.remove_fragmented_ratt = True
 			self.gff.set_children()
 			self._ratt()
 		elif self.filetype == 'manual':
@@ -228,13 +305,12 @@ class Parser(object):
 			self.gff.set_children()
 		else:
 			self.gff.set_children()
-			#self._remove_partial()
 		if self.fasta_file:
 			self.gff.add_fasta(self.fasta_file)
-			self.gff.getseq(topfeaturetype='mRNA',subfeaturetype='CDS')
+		if self.remove_fragmented_ratt:
+			self._remove_fragmented_ratt()
 		if self.remove_noncoding:
-			self._remove_noncoding()			
-		#self.gff.make_index()
+			self._remove_noncoding()
 		self.parsed = True
 		return self.gff
 

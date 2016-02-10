@@ -93,7 +93,7 @@ class GffSubPart(object):
 					e = 'Cannot process manual annotation without Name and ID: {0}'.format(self.stringify().strip())
 					raise IDError(e)
 			else:
-				self.ID = '{0}.{1}'.format(self.attributes['Parent'][0],self.featuretype)
+				self.ID = '{0}.{1}'.format(self.parents[0],self.featuretype)
 		#for parent in self.attributes.get('Parent',[]):
 		#	self.parents.append(parent)
 		#self._key = (self.ID,self.seqid,self.start,self.end,self.strand)
@@ -139,7 +139,15 @@ class GffSubPart(object):
 	@ID.setter
 	def ID(self,value):
 		self.attributes['ID'] = [value]
-	
+
+	@property
+	def forward(self):
+		return self.strand == '+'
+
+	@property
+	def reverse(self):
+		return self.strand == '-'
+
 	@property
 	def parents(self):
 		return self.attributes.get('Parent',[])
@@ -149,32 +157,67 @@ class GffSubPart(object):
 			e = '{0} is not a valid type for parents property'.format(type(value))
 			raise TypeError(e)
 		self.attributes['Parent'] = value
+
+	@property
+	def siblings(self):
+		"""
+		return sorted list of siblings
+		"""
+		sibs = []
+		for parent_ID in self.parents:
+			for parent in self.container[parent_ID]:
+				for sib in self.container.get_children(parent,featuretype=self.featuretype):
+					sibs.append(sib)
+		return sorted(sibs,key = lambda x: x.get_start(),reverse = self.reverse)
 	
 	@property
 	def seq(self):
-		return self._seq
-	@seq.setter
-	def seq(self,value):
-		self._seq = value
-	@seq.deleter
-	def seq(self):
-		self._seq = ''
+		'''
+		if cds.start + 1 == cds.end and index == len(children) - 1:
+			cds.seq = self.seq[cds.seqid][cds.start-1]
+		else:
+			cds.seq = self.seq[cds.seqid][cds.start-1:cds.end]
+		'''
+		if self.featuretype == 'CDS':
+			if self.start + 1 == self.end and self.siblings.index(self) == len(self.siblings) - 1:
+				seq = self.container.seq[self.seqid][self.start-1]
+			else:
+				seq = self.container.seq[self.seqid][self.start-1:self.end]
+			if self.reverse:
+				return self._revcomp(seq)
+			else:
+				return seq
+		elif self.featuretype == 'mRNA':
+			seq = ''
+			cds_list = sorted(self.container.get_children(self,featuretype='CDS'),key = lambda x: x.get_start(),reverse=self.reverse)
+			for i,cds in enumerate(cds_list):
+				if i == 0:
+					if cds.phase != 0:
+						pass
+					seq += cds.seq[cds.phase:]
+				else:
+					seq += cds.seq
+			return seq
+		else:
+			raise NotImplementedError()
 
 	@property
 	def pep(self):
-		if self._pep:
-			return self._pep
-		if self._seq:
-			self._translate()
-			return self.pep
-		e = 'Cannot determine protein sequence because DNA is unknown for feature {0}'.format(self.ID)
-		raise TranslateError(e)
-	@pep.setter
-	def pep(self,value):
-		self._pep = value
-	@pep.deleter
-	def pep(self):
-		self._pep = ''
+		if self.featuretype == 'mRNA':
+			return self._translate(self.seq)
+		elif self.featuretype == 'CDS':
+			return self._translate(self.seq[self.phase:])
+		else:
+			raise NotImplementedError()
+
+	@property
+	def gff_fields(self):
+		fields = (self.seqid,self.source,self.featuretype,self.start,self.end,self.score,self.strand,self.phase)
+		fields = [str(f) for f in fields]
+		attributes = ';'.join(['{0}={1}'.format(key,','.join(value)) for key,value in self.attributes.iteritems() if value])
+		#for key,value in self.attributes.iteritems():
+		#	attributes += '{0}={1}'.format(key,','.join(value)) + ';'
+		return fields + [attributes]
 	
 	def stringify(self,filetype='gff'):
 		"""
@@ -202,8 +245,8 @@ class GffSubPart(object):
 			elif self.featuretype in ['mRNA','CDS']:
 				lines.append('\t\t\tproduct\tNone')
 			return '\n'.join(lines)
-	def setattribute(self,key,value):
-		if isisintance(value,basestring):
+	def set_attribute(self,key,value):
+		if isinstance(value,basestring):
 			self.attributes.setdefault(key,[]).append(value)
 		elif hasattr(value,'__iter__'):
 			for v in value:
@@ -255,8 +298,8 @@ class GffSubPart(object):
 		if not self.seq:
 			raise Exception('Can not find ORF if self.seq not set')
 		frame1 = (0,self.seq[0:])
-		frame2 = (1,self.seq[1:])
-		frame3 = (2,self.seq[2:])
+		frame2 = (1,self.seq[1:-2])
+		frame3 = (2,self.seq[2:-1])
 		for offset,frame in frame1,frame2,frame3:
 			codons = re.findall('...',frame)
 			starts = [index * 3 for index,codon in enumerate(codons) if codon == 'ATG']
@@ -264,17 +307,19 @@ class GffSubPart(object):
 				starts = [index * 3 for index,codon in enumerate(codons) if codon == 'CTG']
 				if not starts:
 					continue
-			stops = [index * 3 for index,codon in enumerate(codons) if codon in ['TAA','TGA','TAG']]
+			stops = [(index+1) * 3 for index,codon in enumerate(codons) if codon in ['TAA','TGA','TAG']]
 			if not stops:
 				continue
+			
 			start = min(starts) + offset
-			stop = min(stops) + offset + 2
-
+			stop = min(stops) + offset
 			if stop - start > 0: # test for positive mRNA length
 				orfs.append((start,stop))
 		if not orfs:
 			return False
 		longest_orf = max(orfs,key = lambda x: x[1]-x[0])
+		print 'SEQ',self.seq
+		print 'ORF',self.seq[longest_orf[0]:longest_orf[1]]
 		return longest_orf
 
 	def getnested(self,reverse=False,featuretype=None):
@@ -292,17 +337,13 @@ class GffSubPart(object):
 					yield c
 		if reverse and (featuretype == None or featuretype == self.featuretype):
 			yield self
-	def _revcomp(self):
+	@staticmethod
+	def _revcomp(seq):
 		comp = {'A':'T','T':'A','G':'C','C':'G','N':'N',
 				'a':'t','t':'a','g':'c','c':'g','n':'n'}
-		self.seq =  ''.join([comp[n] for n in self.seq[::-1]])
-
-	def _translate(self):
-		#print 'translate',self.ID,self._pep
-		if not self.seq:
-			raise NotImplementedError('Cannot determine self.pep without self.seq')
-		if not len(self.seq) % 3 == 0:
-			raise TranslateError('Length of sequence not dividable by 3')
+		return  ''.join([comp[n] for n in seq[::-1]])
+	@staticmethod
+	def _translate(seq):
 		p = {'ACC': 'T', 'ACA': 'T', 'ACG': 'T',
 		     'AGG': 'R', 'AGC': 'S', 'GTA': 'V',
 		     'AGA': 'R', 'ACT': 'T', 'GTG': 'V',
@@ -325,10 +366,9 @@ class GffSubPart(object):
 		     'TGT': 'C', 'GCA': 'A', 'GCC': 'A',
 		     'GCG': 'A', 'GCT': 'A', 'CTC': 'L',
 		     'GAT': 'D'}
-		codons = re.findall('...',self.seq)
+		codons = re.findall('...',seq)
 		pep = [p[codon.upper()] if 'N' not in codon.upper() else 'X' for codon in codons]
-		self.pep = ''.join(pep)
-
+		return ''.join(pep)
 
 	def match(self,other):
 		if not isinstance(other,GffSubPart):

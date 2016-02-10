@@ -43,10 +43,20 @@ class Gff(object):
 			raise TypeError(e)
 		for uniqueID in self.name_index[key]:
 			yield self.features[uniqueID]
+	def __len__(self):
+		return len(self.features.values())
 	def __str__(self):
 		return self.filename #temporary
 	def __repr__(self):
 		return self.__str__()
+
+	def split(self):
+		for seqid in self.position_index:
+			new_gff = Gff()
+			new_gff.seq[seqid] = self.seq[seqid]
+			for sub in self.getitems(seqid=seqid):
+				new_gff.update(sub)
+			yield new_gff
 
 	@property
 	def uniqueID(self):
@@ -118,10 +128,7 @@ class Gff(object):
 
 	def getseq(self,feature=None,subfeaturetype=None,topfeaturetype=None):
 		"""
-		Args:
-			feature: None
-		Returns:
-			None
+		This is replaced by a combination of properties on GffSubPart: seq,pep and siblings
 		"""
 		if isinstance(feature,basestring):
 			features = self[feature]
@@ -132,20 +139,25 @@ class Gff(object):
 		else:
 			raise TypeError('feature is not of type GffSubPart, or String')
 
-		for f in features:
-			if f.seq:
-				f.seq = ''
-			if f.strand == '+':
+		for feature in features:
+			if feature.seq:
+				feature.seq = ''
+			if feature.strand == '+':
 				reverse = False
 			else:
 				reverse = True
-			children = self.get_children(f,featuretype=subfeaturetype)
+			children = self.get_children(feature,featuretype=subfeaturetype)
 			children = sorted([c for c in children],key = lambda x: x.get_start(),reverse=reverse)
-			for c in children:
-				c.seq = self.seq[c.seqid][c.start-1:c.end]
+			for index,cds in enumerate(children):
+				#if cds.end - cds.start == 1 and this is the last cds, only select one nucleotide, otherwise two
+				if cds.start + 1 == cds.end and index == len(children) - 1:
+					cds.seq = self.seq[cds.seqid][cds.start-1]
+				else:
+					cds.seq = self.seq[cds.seqid][cds.start-1:cds.end]
 				if reverse:
-					c._revcomp()
-				f.seq += c.seq
+					cds._revcomp()
+				#print cds.seq
+				feature.seq += cds.seq
 
 	def remove(self,key,nested=True):
 		"""
@@ -155,12 +167,11 @@ class Gff(object):
 		Returns:
 			None
 		"""
-		#print 'remove', key.stringify()
 		if isinstance(key,basestring):
 			keys = self[key]
 		elif isinstance(key,GffSubPart):
 			keys = [key]
-		elif isinstance(key,(list,tuple)):
+		elif hasattr(key,'__iter__'):#isinstance(key,(list,tuple)):
 			keys = []
 			for k in key:
 				if isinstance(k,basestring):
@@ -173,30 +184,30 @@ class Gff(object):
 		else:
 			e = '{0} is not a valid type'.format(key)
 			raise TypeError(e)
-		if nested:
-			nestedkeys = {nestedkey for key in keys for nestedkey in self.get_children(key)}
-		else:
-			nestedkeys = set(keys)
 
-		remove_parents = set()
-		for k in nestedkeys:
-			self.type_index[k.featuretype].remove(k._key)
-			self.position_index[k.seqid].removei(k.start,k.end,{'_key':k._key})
-			#self.position_index[k.seqid].remove(Interval(k.start,k.end,{'_key':k._key}))
-			self.name_index[k.ID].remove(k._key)
-			if len(self.name_index[k.ID]) == 0:
-				del self.name_index[k.ID]
-			parents = (pp for p in k.parents for pp in self[p])
-			for p in parents:
-				if k.ID not in self.name_index:
-					p.children.remove(k.ID)
-				if not p.children:
-					remove_parents.add(p)
-					#self.remove(p,nested=False)
-			del self.features[k._key]
-			self._removedkeys.add(k._key)
-		if remove_parents:
-			self.remove(list(remove_parents),nested=False)
+		for key in keys:
+			if nested:
+				nestedkeys = list(self.get_children(key,reverse=True))
+			else:
+				nestedkeys = [key]
+			remove_parents = set()
+			for nestedkey in nestedkeys:
+				self.type_index[nestedkey.featuretype].remove(nestedkey._key)
+				self.position_index[nestedkey.seqid].discardi(nestedkey.start,nestedkey.end,{'_key':nestedkey._key})
+				#self.position_index[k.seqid].remove(Interval(k.start,k.end,{'_key':k._key}))
+				self.name_index[nestedkey.ID].remove(nestedkey._key)
+				if len(self.name_index[nestedkey.ID]) == 0:
+					del self.name_index[nestedkey.ID]
+				parents = {pp for p in nestedkey.parents for pp in self[p]}
+				for p in parents:
+					if nestedkey.ID not in self.name_index:
+						p.children.remove(nestedkey.ID)
+					if not p.children and p not in nestedkeys:
+						remove_parents.add(p)
+				del self.features[nestedkey._key]
+				self._removedkeys.add(nestedkey._key)
+			if remove_parents:
+				self.remove(list(remove_parents),nested=False)
 
 		return True
 
@@ -226,7 +237,6 @@ class Gff(object):
 		"""
 		for sub in self:
 			for p_name in sub.parents:
-				#print sub.ID,p_name
 				for p_obj in self[p_name]:
 					if sub.ID not in p_obj.children:
 						p_obj.children.append(sub.ID)
@@ -271,6 +281,8 @@ class Gff(object):
 				raise TypeError(e)
 
 		for k in keys:
+			if k._key in self._removedkeys:
+				continue
 			if not reverse and (featuretype == None or k.featuretype in featuretype):
 				yield k
 			for child in k.children:
@@ -328,13 +340,15 @@ class Gff(object):
 		else:
 			reverse = True
 			step = -1
-		children = sorted([c for c in children],key = lambda x:x.start,reverse=reverse)
+		children = sorted((c for c in children),key = lambda x:x.start,reverse=reverse)
 		for c in children:
 			mrna_range = range(pos,pos+c.end-c.start+1)
 			genome_range = range(c.get_start(),c.get_end()+step,step)
+			assert len(mrna_range) == len(genome_range)
 			x = {a:b for a,b in zip(mrna_range,genome_range)}
 			range_map.update(x)
 			pos += c.end - c.start + 1
+		range_map[max(range_map) + 1] = range_map[max(range_map)] + step
 		return range_map
 
 	def _change_cds(self,subfeature,genome_orf):
@@ -344,55 +358,121 @@ class Gff(object):
 		:param orf: tuple with genome start and genome stop of ORF in subfeature mRNA
 		:return: True if succesful change else False
 		"""
-		found_start = False
-		found_stop = False
-		remove = []
+		new_start = genome_orf[0]
+		new_stop = genome_orf[1]
+		forward = subfeature.strand == '+'
+		reverse = subfeature.strand == '-'
+		remove = set()
+		for cds in self.get_children(subfeature,featuretype='CDS'):
+			found_start = False
+			found_stop = False
+			if cds.end < new_start or cds.start > new_stop:
+				#print 'remove'
+				remove.add(cds)
+				continue
+			found_start = cds.start <= new_start <= cds.end
+			found_stop = cds.start <= new_stop <= cds.end
+			if found_start:
+				print 'found start, stop ==',found_stop
+				if found_stop:
+					if reverse:
+						new_start += 1
+				cds.start = new_start
+				cds.phase = 0
+			if found_stop:
+				print 'found stop, start ==',found_start
+				if found_start:
+					if forward:
+						new_stop -= 1
+				cds.end = new_stop
+
+		'''
 		children = self.get_children(subfeature,featuretype='CDS')
 		forward = subfeature.strand == '+'
 		if forward:
 			new_start = genome_orf[0]
-			new_end = genome_orf[1]
+			new_end = genome_orf[1] #- 1
 			children = sorted(children,key=lambda x: x.get_start())
 		else:
 			new_start = genome_orf[1]
-			new_end = genome_orf[0]
+			new_end = genome_orf[0] #+ 1
 			children = sorted(children,key=lambda x: x.get_start(), reverse=True)
+
+		print 'GENOME ORF',genome_orf
 		for c in children:
 			old_start = c.get_start()
 			old_end = c.get_end()
 
-			forward_start = old_start <= new_start <= old_end
-			forward_stop = old_start <= new_end <= old_end
-			reverse_start = old_start >= new_start >= old_end
-			reverse_stop = old_start >= new_end >= old_end
 
+			forward_start = old_start <= new_start <= old_end
+			reverse_start = old_start >= new_start >= old_end
+			forward_stop = old_start <= new_end <= old_end
+			reverse_stop = old_start >= new_end >= old_end
+			#print '---'
 			#change start
 			if (forward and forward_start) or (not forward and reverse_start) and not found_stop:
+				print 'start',old_start,(new_start,old_end)
 				found_start = True
+
+
+				#fix problem with exons of length 1
+				if abs(new_start - old_end) == 1:
+				#	if forward:
+				#		pass
+					#new_start -= 1
+					#c.set_end(old_end + 1)
+					print 'this just happened',old_start,(new_start,old_end)
+
+				#if old_end == new_start:
+				#	if forward:
+				#		pass
+				#		#new_start -= 1
+				#	else:
+				#		pass
+				#		#new_start += 1
+				#	print 'this just happened',old_start,(new_start,old_end)
 				c.set_start(new_start)
-				
 			#change stop and continue loop from the top
 			if (forward and forward_stop) or (not forward and reverse_stop) and found_start and not found_stop:
+				print 'end',(old_start,new_end),old_end
 				found_stop = True
-				if c.get_start() == new_end:
+				#fix problem if start and stop are in the same exon
+				if forward_start:
+					new_end -= 1
+				if reverse_start:
+					new_end += 1
+				#if abs(old_start - old_end) == 1:
+				#	if forward:
+				#		pass
+						#new_end += 1
+				#	else:
+				#		pass
+						#new_end -= 1
+				#remove exons of length 0
+				if old_start == new_end:
 					remove.append(c)
-					continue
-				c.set_end(new_end)
+				else:
+					c.set_end(new_end)
 				continue
-			#remove zero length exons
-			if c.start == c.end:
-				remove.append(c)
 			#remove exon before start
 			if not found_start:
 				remove.append(c)
 			#remove exon after stop
 			if found_stop and found_start:
 				remove.append(c)
+		'''
+		#remove non coding exons
+		print [x.ID for x in remove]
 		if remove:
 			self.remove(remove,nested=False)
+		#recalculate transcript coding sequence
 		self.getseq(subfeature,topfeaturetype=subfeature.featuretype,subfeaturetype='CDS')
-		assert len(subfeature.seq) >= 6,(len(subfeature.seq),subfeature.seq)
-		assert len(subfeature.seq) % 3 == 0,(len(subfeature.seq),subfeature.seq)
+		#assertions to make sure ORF is fixed
+		assert len(subfeature.seq) >= 6,(subfeature.ID,len(subfeature.seq),subfeature.seq)
+		assert len(subfeature.seq) % 3 == 0,(subfeature.ID,subfeature.strand,len(subfeature.seq),subfeature.seq)
+		assert subfeature.seq[:3] in ('CTG','ATG'),(subfeature.ID,subfeature.seq[:3],subfeature.seq)
+		assert subfeature.seq[-3:] in ('TGA','TAA','TAG')
+		assert '*' not in subfeature.pep[-1],(subfeature.ID,subfeature.pep)
 		return True
 
 	def fix_orf(self,subfeature,starts=('ATG','CTG'),stops=('TAA','TGA','TAG'),min_len=6):
@@ -415,7 +495,10 @@ class Gff(object):
 		range_map = self._range_map(subfeature)
 		if not range_map:
 			return False
+		#print orf
+		#print range_map
 		genome_orf = range_map[orf[0]],range_map[orf[1]] #self._map_start_stop(orf,range_map)
+		#print genome_orf
 		if subfeature.strand == '-':
 			genome_orf = (genome_orf[1],genome_orf[0])
 		if not genome_orf:
