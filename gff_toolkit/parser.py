@@ -111,7 +111,7 @@ class Parser(object):
 			transcript.source = 'ratt'
 			transcript.attributes = {key:value for key,value in transcript.attributes.iteritems() if key in ('ID','Parent')}
 
-			gene_ID = [x for x in self._get_lower_ratt_ids(transcript.ID)][-1][:-2]
+			gene_ID = transcript.ID.split('.')[0]#[x for x in self._get_lower_ratt_ids(transcript.ID)][-1][:-2]
 			
 			if not gene_ID in self.gff.name_index:
 				gene_parts = transcript.gff_fields

@@ -19,21 +19,20 @@ class Gff(object):
 		"""
 		Fire it up!
 		"""
-		self.features = {} #dict with {uniqueID1:feature1,uniqueID2:feature2,...}   OLD:{seqid:[GffSubPart1,GffSubPart2,etc]}
+		self.features = {} #dict with {_key1:feature1,_key2:feature2,...}   OLD:{seqid:[GffSubPart1,GffSubPart2,etc]}
 		self.seq = {} #sequencedict with {header:seq}
-		#self._typecounts = {l:0 for l in self._featuretypes}
 		self._removedkeys = set()
-		self._uniqueID = 0
+		self._uniqueID = 0 #unique IDs for subfeature._key
 		self.filename = kwargs.get('filename','')
-		self.name_index = {} #dict with {ID:set(uniqueID1,uniqueID2,),..} to access features based on non unique ID
+		self.name_index = {} #dict with {ID:set(_key1,_key2,),..} to access features based on non unique ID
 		self.position_index = {}#Intervaltree
 		self.type_index = {l:set() for l in self._featuretypes} #dict with {featuretype:set(uniqueID1,uniqueID2,),...} to access features based on featuretype
 	def __iter__(self):
 		"""
-		Lets loop over all subfeatures
+		Iterate over all values
 		"""
-		for f in self.features.values():
-			yield f
+		for item in self.features.values():
+			yield item
 	def __getitem__(self,key):
 		"""
 		Allow square bracket access based on ID, like this: gff[ID]
@@ -49,6 +48,17 @@ class Gff(object):
 		return self.filename #temporary
 	def __repr__(self):
 		return self.__str__()
+	def __add__(self,other):
+		"""
+		Add two Gff objects together
+		"""
+		new_gff = Gff()
+		for self_obj in self:
+			new_gff.update(obj)
+		for other_obj in other:
+			new_gff.update(obj)
+		new_gff.set_children()
+		return new_gff
 
 	def split(self):
 		for seqid in self.position_index:
@@ -85,6 +95,10 @@ class Gff(object):
 		Returns:
 			GffSubPart
 		"""
+		coords = (start,end)
+		if coords.count(None) == 1:
+			e = '({0},{1}) are not valid coordinates'.format(*coords)
+			raise Exception(e)
 		if featuretype != None:
 			if isinstance(featuretype,basestring) and featuretype in self._featuretypes:
 				featuretype = [featuretype]
@@ -94,10 +108,7 @@ class Gff(object):
 				e = '{0} is not a valid type for featuretype'.format(type(featuretype))
 				raise TypeError(e)
 		if seqid == None:
-			if start != None:
-				e = 'Can not provide start when no seqid is provided'
-				raise NotImplementedError(e)
-			elif end != None:
+			if coords.count(None) != 2:
 				e = 'Can not provide end when no seqid is provided'
 				raise NotImplementedError(e)
 			elif strand != None:
@@ -117,8 +128,6 @@ class Gff(object):
 				continue #False
 			if start == None and end == None:
 				subs = (self.features[_key] for _key in (interval.data['_key'] for interval in self.position_index[seqid].items()) if _key not in self._removedkeys)
-			elif (start == None and end != None) or (start != None and end == None):
-				raise Exception()
 			else:
 				subs = (self.features[_key] for _key in (interval.data['_key'] for interval in self.position_index[seqid].search(start,end)) if _key not in self._removedkeys)
 			for sub in subs:
@@ -226,7 +235,7 @@ class Gff(object):
 		self.name_index.setdefault(subfeature.ID,set()).add(ID)
 		self.type_index[subfeature.featuretype].add(ID)
 
-		interval = Interval(subfeature.start,subfeature.end,{'_key':ID})
+		interval = Interval(subfeature._start,subfeature.end,{'_key':ID})
 		self.position_index.setdefault(subfeature.seqid,IntervalTree()).add(interval)
 		subfeature.container = self
 
@@ -241,13 +250,22 @@ class Gff(object):
 					if sub.ID not in p_obj.children:
 						p_obj.children.append(sub.ID)
 
-	def get_children(self,key,reverse=False,featuretype=None):
+	def get_parents(self,key,reverse=True,featuretype=None):
+		"""
+		"""
+		pass
+
+	def get_children(self,key,reverse=False,featuretype=None,seen=None):
 		"""
 		:param key: subfeature ID or subfeature object
 		:param reverse: reverses return order. I.e.: reverse=True return CDS->mRNA->gene. reverse=False returns gene->mRNA->CDS
 		:param featuretype: string or list with featuretypes to be returned
 		:return: nested generator of subfeature objects
+
+		TODO: add something that prevents double yields
 		"""
+		if seen == None:
+			seen = set()
 		if isinstance(key,GffSubPart):
 			keys = [key]
 		elif isinstance(key,basestring):
@@ -279,17 +297,20 @@ class Gff(object):
 			else:
 				e = '{0} is not a valid type for featuretype'.format(type(featuretype))
 				raise TypeError(e)
-
+		#print [s.ID for s in seen]
 		for k in keys:
 			if k._key in self._removedkeys:
 				continue
-			if not reverse and (featuretype == None or k.featuretype in featuretype):
+			if not reverse and (featuretype == None or k.featuretype in featuretype) and k not in seen:
+				seen.add(k)
 				yield k
 			for child in k.children:
-				for nested_child in self.get_children(child):
-					if featuretype == None or nested_child.featuretype in featuretype:
+				for nested_child in self.get_children(child,seen=seen):
+					if featuretype == None or nested_child.featuretype in featuretype and k not in seen:
+						seen.add(nested_child)
 						yield nested_child
-			if reverse and (featuretype == None or k.featuretype in featuretype):
+			if reverse and (featuretype == None or k.featuretype in featuretype) and k not in seen:
+				seen.add(k)
 				yield k
 
 	def add_fasta(self,filename):

@@ -48,14 +48,14 @@ class GffSubPart(object):
 			self.seqid = args[0]
 			self.source = args[1]
 			self.featuretype = args[2]
-			self.start = min(int(args[3]),int(args[4]))#int(args[3])
-			self.end = max(int(args[3]),int(args[4]))#int(args[4])
-			if not self.end > self.start:
-				if kwargs.get('strict',False):
-					e = 'End must be larger than Start: {0}\t{1}\t{2}'.format(self.seqid,self.start,self.end)
-					raise CoordinateError(e)#,[self.seqid,self.start,self.end]
-				else:
-					self.end += 1
+			self.start = int(args[3])
+			self.end = int(args[4])
+			if not self.end >= self.start:
+				#if kwargs.get('strict',False):
+				e = 'End must be larger than Start: {0}\t{1}\t{2}'.format(self.seqid,self.start,self.end)
+				raise CoordinateError(e)#,[self.seqid,self.start,self.end]
+				#else:
+				#	self.end += 1
 			if args[5] == '.':
 				self.score = args[5]
 			else:
@@ -102,8 +102,14 @@ class GffSubPart(object):
 		Lets print this
 		"""
 		while True:
+			try:
+				seq = self.seq
+				pep = self.pep
+			except:
+				seq = ''
+				pep = ''
 			s = {	'ID':self.ID,'seqid':self.seqid,'source':self.source,'type':self.featuretype,'start':self.start,'end':self.end,
-					'score':self.score,'strand':self.strand,'phase':self.phase,'attributes':self.attributes,'children':self.children,'parents':self.parents,'seq':self.seq }
+					'score':self.score,'strand':self.strand,'phase':self.phase,'attributes':self.attributes,'children':self.children,'parents':self.parents,'seq':seq,'pep':pep }
 
 			return pprint.pformat(s,indent=1)
 		#code below can be used to print gff style, currently done by stringify() method
@@ -132,6 +138,12 @@ class GffSubPart(object):
 		else:
 			e = 'Cannot compare GffSubPart to object of type {0}'.format(type(other))
 			raise NotImplementedError(e)
+	@property
+	def _start(self):
+		"""
+		This is a hack for the intervaltree: it prevents NULL intervals when start == end
+		"""
+		return self.start - 1
 	
 	@property
 	def ID(self):
@@ -179,21 +191,21 @@ class GffSubPart(object):
 			cds.seq = self.seq[cds.seqid][cds.start-1:cds.end]
 		'''
 		if self.featuretype == 'CDS':
-			if self.start + 1 == self.end and self.siblings.index(self) == len(self.siblings) - 1:
-				seq = self.container.seq[self.seqid][self.start-1]
-			else:
-				seq = self.container.seq[self.seqid][self.start-1:self.end]
+			#if self.start + 1 == self.end and self.siblings.index(self) == len(self.siblings) - 1:
+			#	seq = self.container.seq[self.seqid][self.start-1]
+			#else:
+			seq = self.container.seq[self.seqid][self.start-1:self.end]
 			if self.reverse:
-				return self._revcomp(seq)
-			else:
-				return seq
+				seq = self._revcomp(seq)
+			#print '+',seq
+			return seq
 		elif self.featuretype == 'mRNA':
 			seq = ''
 			cds_list = sorted(self.container.get_children(self,featuretype='CDS'),key = lambda x: x.get_start(),reverse=self.reverse)
 			for i,cds in enumerate(cds_list):
-				if i == 0:
-					if cds.phase != 0:
-						pass
+				if i == 0 and cds.phase != '.':
+					#if cds.phase != '.':
+					#	pass
 					seq += cds.seq[cds.phase:]
 				else:
 					seq += cds.seq
@@ -218,6 +230,10 @@ class GffSubPart(object):
 		#for key,value in self.attributes.iteritems():
 		#	attributes += '{0}={1}'.format(key,','.join(value)) + ';'
 		return fields + [attributes]
+
+	def get_children(self,*args,**kwargs):
+		for sub in self.container.get_children(self,args,kwargs):
+			yield sub
 	
 	def stringify(self,filetype='gff'):
 		"""
