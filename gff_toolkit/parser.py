@@ -4,6 +4,7 @@ from gff import Gff
 from gffsubpart import GffSubPart,TranslateError
 from itertools import groupby
 import uuid
+import re
 
 class Parser(object):
 	"""
@@ -11,7 +12,7 @@ class Parser(object):
 	The parse() method return the processed Gff object.
 	Has several methods for known incorrectly formatted files: _ratt() and _manual(), which are called by specifying filetype
 	"""
-	_filetypes = ['standard','ratt','manual']
+	_filetypes = ('standard','ratt','manual','interproscan')
 	def __init__(self,gff_file,filetype='standard',fasta_file=None,remove_noncoding=False,limit=None,author=None):
 		if filetype not in self._filetypes:
 			raise TypeError()
@@ -47,12 +48,16 @@ class Parser(object):
 		"""
 		with open(self.filename,'rU') as fh:
 			for line in fh:
-				if line[0] == '#' or not line.strip():
+				if not line.strip():
 					continue
+				if line[0] == '#':
+					if 'FASTA' in line:
+						return
+					continue
+				if self.filetype == 'interproscan':
+					line = re.sub('; ',': ',line)
 				parts = line.strip().split('\t')
-				#print parts
 				if self.limit != None:
-					#print self.limit
 					#Series of list comprehensions to check if any of the relevant attributes of sub are in the limit dictionary
 					#An empty list is falsy, so if the relevant value is not in the limit dictionary, continue to the next line
 					if not [x for x in self.limit.get('seqid',[parts[0]]) if x == parts[0]]:
@@ -64,7 +69,6 @@ class Parser(object):
 					elif not [x for x in self.limit.get('strand',[parts[6]]) if x == parts[6]]:
 						continue
 				sub = GffSubPart(*parts,filetype=self.filetype)
-				#print sub.stringify().strip()
 				yield sub
 
 	def _ratt(self):
@@ -82,11 +86,6 @@ class Parser(object):
 			name_index_map[new_transcript_ID] = transcript._key
 			name_index_remove.add(transcript.ID)
 			
-			#if transcript.ID not in featuremap:
-			#	featuremap.setdefault(new_transcript_ID,set()).add(transcript.ID)
-			#else:
-			#	raise ValueError('old ID already exists!')
-
 			sub_counter = {}
 			for sub in self.gff.get_children(transcript):
 				if sub == transcript:
@@ -95,14 +94,11 @@ class Parser(object):
 				sub_counter[sub.featuretype] += 1
 				
 				sub.parents = [new_transcript_ID]
-				#old_sub_ID = sub.ID
 				new_sub_ID = '{0}.{1}{2}'.format(new_transcript_ID,sub.featuretype,sub_counter[sub.featuretype])
 				
 				child_map.setdefault(new_transcript_ID,[]).append(new_sub_ID)
 				name_index_map[new_sub_ID] = sub._key
 				name_index_remove.add(sub.ID)
-
-				#featuremap.setdefault(newsubID,set()).add(oldsubID)
 
 				sub.ID = new_sub_ID
 				sub.source = 'ratt'
@@ -111,7 +107,7 @@ class Parser(object):
 			transcript.source = 'ratt'
 			transcript.attributes = {key:value for key,value in transcript.attributes.iteritems() if key in ('ID','Parent')}
 
-			gene_ID = transcript.ID.split('.')[0]#[x for x in self._get_lower_ratt_ids(transcript.ID)][-1][:-2]
+			gene_ID = transcript.ID.split('.')[0]
 			
 			if not gene_ID in self.gff.name_index:
 				gene_parts = transcript.gff_fields
@@ -130,12 +126,6 @@ class Parser(object):
 			self.gff.name_index[new_name] = [_key]
 		for old_name in name_index_remove:
 			self.gff.name_index.pop(old_name)
-		#for x in featuremap:
-		#	for y in featuremap[x]:
-		#		print x,y
-		#		self.gff.name_index[x] = self.gff.name_index[y]
-		#	for y in featuremap[x]:
-		#		self.gff.name_index.pop(y,None)
 		for parent_id in child_map:
 			for parent in self.gff[parent_id]:
 				parent.children = child_map[parent_id]
@@ -189,8 +179,24 @@ class Parser(object):
 				cds.attributes.pop('modified by',[])
 				cds.attributes.pop('created by',[])
 				cds.attributes['Created by'] = [self.author]
-				#gff.update(sub)
-		#self.gff.set_children()
+	def _interproscan(self):
+		type_dict = {}
+		for feature in self.gff:
+			for attribute,values in feature.attributes.iteritems():
+				feature.attributes[attribute] = [value.strip('"') for value in values]
+			if feature.featuretype == 'protein_match':
+				#set parent attribute
+				parent = feature.attributes['Target'][0]
+				parent = parent.split()[0]
+				feature.parents = [parent]
+				#determine new ID based on parent name and source, this should result in unique IDs, opposed to what comes out of IPS
+				source = feature.source
+				type_dict.setdefault(parent,{}).setdefault(source,0)
+				type_dict[parent][source] += 1
+				type_count = type_dict[parent][source]
+				ID = '{0}.{1}.{2}'.format(parent,source,type_count)
+				self.gff.name_index[ID] = self.gff.name_index.pop(feature.ID)
+				feature.ID = ID
 
 	@staticmethod
 	def _assert_equal(subslist):
@@ -295,6 +301,11 @@ class Parser(object):
 	def parse(self):
 		self.remove_fragmented_ratt = False
 		for subpart in self._readlines():
+			#if self.filetype == 'interproscan':
+			#	if subpart.featuretype == 'protein_match':
+			#		parent = subpart.attributes['Target'][0]
+			#		parent = parent.split()[0]
+			#		subpart.parents = [parent]
 			self.gff.update(subpart)
 		if self.filetype == 'ratt':
 			self.remove_fragmented_ratt = True
@@ -303,7 +314,12 @@ class Parser(object):
 		elif self.filetype == 'manual':
 			self._manual()
 			self.gff.set_children()
+		elif self.filetype == 'interproscan':
+			self._interproscan()
+			self.gff.set_children()
 		else:
+			pass
+		if self.filetype != 'ratt':
 			self.gff.set_children()
 		if self.fasta_file:
 			self.gff.add_fasta(self.fasta_file)

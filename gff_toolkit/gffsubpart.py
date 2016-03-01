@@ -22,8 +22,8 @@ class GffSubPart(object):
 	work on getter/setter for ID, ratt uses locus_tag for ID of transferred annotations, currently this is handled by parser.py
 	Make this a sort of 'baseclass', for instance only mRNA should have a pep option. Do this by subclassing
 	"""
-	_featuretypes = ['gene','mRNA','CDS','exon','three_prime_UTR','five_prime_UTR','match','match_part','protein_match','transcript_match','biological_region']
-	_filetypes = ['gff','tbl']
+	_featuretypes = ('gene','mRNA','CDS','exon','three_prime_UTR','five_prime_UTR','match','match_part','protein_match','transcript_match','biological_region','polypeptide')
+	_filetypes = ('gff','tbl')
 	def __init__(self,*args,**kwargs):
 		"""
 		Letsa go!
@@ -51,11 +51,8 @@ class GffSubPart(object):
 			self.start = int(args[3])
 			self.end = int(args[4])
 			if not self.end >= self.start:
-				#if kwargs.get('strict',False):
-				e = 'End must be larger than Start: {0}\t{1}\t{2}'.format(self.seqid,self.start,self.end)
-				raise CoordinateError(e)#,[self.seqid,self.start,self.end]
-				#else:
-				#	self.end += 1
+				e = 'End must be greater than or equal to Start: {0}\t{1}\t{2}'.format(self.seqid,self.start,self.end)
+				raise CoordinateError(e)
 			if args[5] == '.':
 				self.score = args[5]
 			else:
@@ -69,18 +66,12 @@ class GffSubPart(object):
 			e = 'Line is not proper gff: ' + '\t'.join(args)
 			raise AttributeError(e)
 		if len(args) == 9:
-			att = args[8].split(';')
-			for a in att:
-				key = a.split('=')[0]
-				values = a.split('=')[1].split(',')
-				
-				for value in values:
-					#print key,value
-					self.attributes.setdefault(key,[]).append(value)
-				#self.attributes[key].append()
-			#self.attributes = { a.split('=')[0]: a.split('=')[1].split(',') for a in att}
-		#self.ID = self.attributes.get('ID',[None])[0]
-		#print self.ID
+			#split column 9 on ';' to get attributes
+			#split attributes on '=' to get key:value
+			self.attributes = dict(a.split('=',1) for a in args[8].split(';'))
+			#split value on ',' to get values
+			for attribute,value in self.attributes.iteritems():
+				self.attributes[attribute] = value.split(',')
 		if not self.ID:
 			if kwargs.get('strict',False):
 				e = 'No ID found in attributes: ' + '\t'.join(args)
@@ -94,9 +85,6 @@ class GffSubPart(object):
 					raise IDError(e)
 			else:
 				self.ID = '{0}.{1}'.format(self.parents[0],self.featuretype)
-		#for parent in self.attributes.get('Parent',[]):
-		#	self.parents.append(parent)
-		#self._key = (self.ID,self.seqid,self.start,self.end,self.strand)
 	def __str__(self):
 		"""
 		Lets print this
@@ -138,12 +126,60 @@ class GffSubPart(object):
 		else:
 			e = 'Cannot compare GffSubPart to object of type {0}'.format(type(other))
 			raise NotImplementedError(e)
+	def todict(self):
+		"""
+		Return a dict
+		"""
+		try:
+			seq = self.seq
+			pep = self.pep
+		except:
+			seq = ''
+			pep = ''
+		dic = {	'ID':self.ID,
+				'seqid':self.seqid,
+				'source':self.source,
+				'type':self.featuretype,
+				'start':self.start,
+				'end':self.end,
+				'score':self.score,
+				'strand':self.strand,
+				'phase':self.phase,
+				'attributes':self.attributes,
+				'children':self.children,
+				'parents':self.parents,
+				'seq':seq,
+				'pep':pep,
+				'file':self.container.filename}
+		return dic
+	def fromdict(self,dic):
+		pass
 	@property
 	def _start(self):
 		"""
 		This is a hack for the intervaltree: it prevents NULL intervals when start == end
 		"""
 		return self.start - 1
+
+	@property
+	def target(self):
+		_target = self.attributes.get('Target',[False])[0]
+		if not _target:
+			return
+		_target = _target.split()
+		target_dict = {'ID':_target[0],'start':_target[1],'end':_target[2]}
+		return target_dict
+	@target.setter
+	def target(self,value):
+		if not isinstance(value,dict):
+			raise ValueError()
+		if not 'ID' in value.keys() or 'start' in value.keys() or 'end' in value.keys():
+			raise ValueError()
+		_target = '{0} {1} {2}'.format(value['ID'],value['start'],value['end'])
+		self.attributes['Target'] = [_target]
+	@target.deleter
+	def target(self):
+		self.attributes.pop('Target',False)
 	
 	@property
 	def ID(self):
@@ -423,56 +459,4 @@ class GffSubPart(object):
 		else:
 			return 0
 
-class Gene(GffSubPart):
-	"""
-	Should inherit from GffSubPart
-	"""
-	pass
-
-class Mrna(GffSubPart):
-	"""
-	Should inherit from GffSubPart
-	"""
-	def __init__(self):
-		super(mRNA,self).__init__
-		self._pep = ''
-	@property
-	def pep(self):
-		return self._pep
-	@pep.setter
-	def pep(value):
-		self._pep = value
-	@pep.deleter
-	def pep():
-		self._pep = ''
-	
-class Cds(GffSubPart):
-	"""
-	Should inherit from GffSubPart
-	"""
-	pass
-
-class Exon(GffSubPart):
-	"""
-	Should inherit from GffSubPart
-	"""
-	pass
-
-class Utr(GffSubPart):
-	"""
-	Should inherit from GffSubPart
-	"""
-	pass
-
-class Match(GffSubPart):
-	"""
-	Should inherit from GffSubPart
-	"""
-	pass
-
-class MatchPart(GffSubPart):
-	"""
-	Should inherit from GffSubPart
-	"""
-	pass
 

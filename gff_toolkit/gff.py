@@ -12,9 +12,9 @@ class Gff(object):
 	_combos = [{'gene':{'mRNA':['CDS','exon','five_prime_UTR','three_prime_UTR']}},
 				{'match':'match_part'},
 				{'protein_match':'match_part'}]
-	_featuretypes = ['gene','mRNA','CDS','exon','five_prime_UTR','three_prime_UTR',
+	_featuretypes = ('gene','mRNA','CDS','exon','five_prime_UTR','three_prime_UTR',
 	          'match','protein_match','transcript_match','match_part',
-	           'biological_region']
+	           'biological_region','polypeptide')
 	def __init__(self,*args,**kwargs):
 		"""
 		Fire it up!
@@ -54,10 +54,10 @@ class Gff(object):
 		"""
 		new_gff = Gff()
 		for self_obj in self:
-			new_gff.update(obj)
+			new_gff.update(self_obj)
 		for other_obj in other:
-			new_gff.update(obj)
-		new_gff.set_children()
+			new_gff.update(other_obj)
+		#new_gff.set_children()
 		return new_gff
 
 	def split(self):
@@ -74,7 +74,7 @@ class Gff(object):
 		return self._uniqueID
 	
 	def typecounts(self):
-		return pprint.pprint({k:len(v) for k,v in self.type_index.iteritems() if len(v) > 0})
+		return {k:len(v) for k,v in self.type_index.iteritems() if len(v) > 0}
 	
 	def stringify(self):
 		"""
