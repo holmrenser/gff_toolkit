@@ -10,7 +10,7 @@ def main():
 		packages=['gff_toolkit'],
 		author='rens holmer',
 		author_email='rens.holmer@wur.nl',
-		version='0.1.9',
+		version='0.1.10',
 		url='https://github.com/holmrenser/gff_toolkit',
 		install_requires=['intervaltree']
 		)

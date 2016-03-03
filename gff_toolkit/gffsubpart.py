@@ -268,7 +268,7 @@ class GffSubPart(object):
 		return fields + [attributes]
 
 	def get_children(self,*args,**kwargs):
-		for sub in self.container.get_children(self,args,kwargs):
+		for sub in self.container.get_children(self,*args,**kwargs):
 			yield sub
 	
 	def stringify(self,filetype='gff'):

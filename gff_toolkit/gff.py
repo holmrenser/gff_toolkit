@@ -131,7 +131,7 @@ class Gff(object):
 			else:
 				subs = (self.features[_key] for _key in (interval.data['_key'] for interval in self.position_index[seqid].search(start,end)) if _key not in self._removedkeys)
 			for sub in subs:
-				if (featuretype == None or sub.featuretype in featuretype) and (strand == None or sub.strand == strand):
+				if (featuretype == None or sub.featuretype in featuretype) and (strand == None or sub.strand == strand) and not (sub.start == end or sub.end == start):
 					yield sub
 		return
 
