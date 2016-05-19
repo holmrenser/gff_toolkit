@@ -242,7 +242,7 @@ class GffSubPart(object):
 				if i == 0 and cds.phase != '.':
 					#if cds.phase != '.':
 					#	pass
-					seq += cds.seq[cds.phase:]
+					seq += cds.seq#[cds.phase:]
 				else:
 					seq += cds.seq
 			return seq
@@ -252,9 +252,15 @@ class GffSubPart(object):
 	@property
 	def pep(self):
 		if self.featuretype == 'mRNA':
-			return self._translate(self.seq)
+			cdss = sorted(self.get_children(self),key = lambda x: x.get_start(),reverse=self.reverse)
+			cds = cdss[0]
+			phase = cds.phase
+			return self._translate(self.seq[phase:])
 		elif self.featuretype == 'CDS':
-			return self._translate(self.seq[self.phase:])
+			phase = self.phase
+			if phase =='.':
+				phase = 0
+			return self._translate(self.seq[phase:])
 		else:
 			raise NotImplementedError()
 
@@ -266,6 +272,14 @@ class GffSubPart(object):
 		#for key,value in self.attributes.iteritems():
 		#	attributes += '{0}={1}'.format(key,','.join(value)) + ';'
 		return fields + [attributes]
+
+	@property
+	def gtf_fields(self):
+		fields = (self.seqid,self.source,self.featuretype,self.start,self.end,self.score,self.strand,self.phase)
+		fields = [str(f) for f in fields]
+		attributes = '; '.join(['{0} "{1}"'.format(key,','.join(value)) for key,value in self.attributes.iteritems() if value])
+		return fields + [attributes]
+	
 
 	def get_children(self,*args,**kwargs):
 		for sub in self.container.get_children(self,*args,**kwargs):
