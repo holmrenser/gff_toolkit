@@ -227,24 +227,15 @@ class GffSubPart(object):
 			cds.seq = self.seq[cds.seqid][cds.start-1:cds.end]
 		'''
 		if self.featuretype == 'CDS':
-			#if self.start + 1 == self.end and self.siblings.index(self) == len(self.siblings) - 1:
-			#	seq = self.container.seq[self.seqid][self.start-1]
-			#else:
 			seq = self.container.seq[self.seqid][self.start-1:self.end]
 			if self.reverse:
 				seq = self._revcomp(seq)
-			#print '+',seq
 			return seq
 		elif self.featuretype == 'mRNA':
 			seq = ''
 			cds_list = sorted(self.container.get_children(self,featuretype='CDS'),key = lambda x: x.get_start(),reverse=self.reverse)
-			for i,cds in enumerate(cds_list):
-				if i == 0 and cds.phase != '.':
-					#if cds.phase != '.':
-					#	pass
-					seq += cds.seq#[cds.phase:]
-				else:
-					seq += cds.seq
+			for cds in cds_list:
+				seq += cds.seq
 			return seq
 		else:
 			raise NotImplementedError()
@@ -255,6 +246,11 @@ class GffSubPart(object):
 			cdss = sorted(self.get_children(self),key = lambda x: x.get_start(),reverse=self.reverse)
 			cds = cdss[0]
 			phase = cds.phase
+			#print phase
+			#print self.seq
+			#print self._translate(self.seq)
+			#print self.seq[phase:]
+			#print self._translate(self.seq[phase:])
 			return self._translate(self.seq[phase:])
 		elif self.featuretype == 'CDS':
 			phase = self.phase
@@ -269,8 +265,6 @@ class GffSubPart(object):
 		fields = (self.seqid,self.source,self.featuretype,self.start,self.end,self.score,self.strand,self.phase)
 		fields = [str(f) for f in fields]
 		attributes = ';'.join(['{0}={1}'.format(key,','.join(value)) for key,value in self.attributes.iteritems() if value])
-		#for key,value in self.attributes.iteritems():
-		#	attributes += '{0}={1}'.format(key,','.join(value)) + ';'
 		return fields + [attributes]
 
 	@property
@@ -448,6 +442,7 @@ class GffSubPart(object):
 			return True
 		else:
 			return False
+			
 	def exact_match(self,other):
 		if not isinstance(other,GffSubPart):
 			e = '{0} is not of type GffSubPart, can not match'
