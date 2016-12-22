@@ -179,6 +179,7 @@ class Parser(object):
 				cds.attributes.pop('modified by',[])
 				cds.attributes.pop('created by',[])
 				cds.attributes['Created by'] = [self.author]
+				
 	def _interproscan(self):
 		type_dict = {}
 		for feature in self.gff:
@@ -334,7 +335,7 @@ def fasta_iter(fasta_file):
 	with open(fasta_file,'rU') as filehandle:
 		faiter = (x[1] for x in groupby(filehandle, lambda line: line[0] == '>'))
 		for header in faiter:
-			header = header.next()[1:].strip()
+			header = header.next()[1:].strip().split()[0]
 			seq = ''.join(s.strip() for s in faiter.next())
 			yield header,seq
 

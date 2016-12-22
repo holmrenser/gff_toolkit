@@ -68,7 +68,11 @@ class GffSubPart(object):
 		if len(args) == 9:
 			#split column 9 on ';' to get attributes
 			#split attributes on '=' to get key:value
-			self.attributes = dict(a.split('=',1) for a in args[8].split(';'))
+			try:
+				self.attributes = dict(a.split('=',1) for a in args[8].strip(';').split(';'))
+			except:
+				print args
+				raise 
 			#split value on ',' to get values
 			for attribute,value in self.attributes.iteritems():
 				self.attributes[attribute] = value.split(',')
@@ -226,7 +230,7 @@ class GffSubPart(object):
 		else:
 			cds.seq = self.seq[cds.seqid][cds.start-1:cds.end]
 		'''
-		if self.featuretype == 'CDS':
+		if self.featuretype in ['CDS','exon','five_prime_UTR','three_prime_UTR']:
 			seq = self.container.seq[self.seqid][self.start-1:self.end]
 			if self.reverse:
 				seq = self._revcomp(seq)
@@ -246,19 +250,14 @@ class GffSubPart(object):
 			cdss = sorted(self.get_children(self),key = lambda x: x.get_start(),reverse=self.reverse)
 			cds = cdss[0]
 			phase = cds.phase
-			#print phase
-			#print self.seq
-			#print self._translate(self.seq)
-			#print self.seq[phase:]
-			#print self._translate(self.seq[phase:])
-			return self._translate(self.seq[phase:])
 		elif self.featuretype == 'CDS':
 			phase = self.phase
-			if phase =='.':
-				phase = 0
-			return self._translate(self.seq[phase:])
 		else:
 			raise NotImplementedError()
+
+		if phase not in [0,1,2]:
+			phase = 0
+		return self._translate(self.seq[phase:])
 
 	@property
 	def gff_fields(self):

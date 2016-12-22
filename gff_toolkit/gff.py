@@ -74,6 +74,12 @@ class Gff(object):
 		return self._uniqueID
 	
 	def typecounts(self):
+		"""
+		Args:
+			None
+		Returns:
+			Dictionary with counts per GffSubPart type
+		"""
 		return {k:len(v) for k,v in self.type_index.iteritems() if len(v) > 0}
 	
 	def stringify(self):
@@ -87,13 +93,38 @@ class Gff(object):
 		for sub in self:
 			string.append(sub.stringify())
 		return ''.join(string)
-
-	def getitems(self,seqid=None,start=None,end=None,strand=None,featuretype=None):
+	def getclosest(self, seqid, pos, strand = None, featuretype = None):
 		"""
 		Args:
-			seqid: blabla
+			seqid: Scaffold name (string) [REQUIRED]
+			pos: Position on scaffold (int) [REQUIRED]
+			strand: search on positive or negative strand or both ('+','-' or None for both). Default is both
+			featuretype: returned featuretypes (string or list of strings)
 		Returns:
-			GffSubPart
+			GffSubPart closest to given position on given scaffold
+		"""
+		features = self.getitems(seqid = seqid, strand = strand, featuretype = featuretype)
+		sorted_features = sorted(features, key = lambda x: x.start)
+		for i,feature in enumerate(sorted_features):
+			next_feature = sorted_features[i+1]
+			if pos >= feature.end and pos <= next_feature.start:
+				break
+		if pos - feature.end < next_feature.start - pos:
+			closest = feature
+		else:
+			closest = next_feature
+		return closest
+
+	def getitems(self, seqid = None, start = None, end = None, strand = None, featuretype = None):
+		"""
+		Args:
+			seqid: Scaffold name (string)
+			start: leftbound position (int)
+			end: rightbound position (int)
+			strand: search on positive or negative strand or both ('+','-' or None for both). Default is both
+			featuretype: returned featuretypes (string or list of strings)
+		Returns:
+			Generator object containing all GffSubParts within the given specs (interval, featuretype)
 		"""
 		coords = (start,end)
 		if coords.count(None) == 1:
@@ -321,7 +352,7 @@ class Gff(object):
 		with open(filename,'rU') as filehandle:
 			faiter = (x[1] for x in groupby(filehandle, lambda line: line[0] == '>'))
 			for header in faiter:
-				header = header.next()[1:].strip()
+				header = header.next()[1:].strip().split()[0]
 				seq = ''.join(s.strip() for s in faiter.next())
 				self.seq[header] = seq
 

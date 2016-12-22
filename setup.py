@@ -11,7 +11,7 @@ def main():
 		author='rens holmer',
 		author_email='rens.holmer@wur.nl',
 		description="Tools for handling gff files",
-		version='0.1.11',
+		version='0.1.12',
 		url='https://github.com/holmrenser/gff_toolkit',
 		install_requires=['intervaltree']
 		)
